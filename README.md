@@ -33,56 +33,59 @@ Alle Komponenten werden direkt über die Benutzeroberfläche unter **Einstellung
 
 ### Schritt 1 — Helfer und Sensoren erstellen
 
-#### 1.1 — input_number: Spike-Filter Puffer
+1.1 — input_number: Spike-Filter Puffer
 
-1. **Helfer erstellen → Zahl**
-2. Name: `Solakon Netz spike-gefiltert`
-3. Minimaler Wert: `-10000` / Maximaler Wert: `10000`
-4. Einheit: `W` / Anzeigemodus: `Eingabefeld`
-5. Entity ID: **`input_number.solakon_grid_stable`**
+* Typ: Helfer → Zahl
+* Name: Solakon Netz spike-gefiltert
+* ID: input_number.solakon_netz_spike_gefiltert
+* Werte: -10000 bis 10000 / Einheit: W / Modus: Eingabefeld
 
-#### 1.2 — input_number: Dynamischer Offset Zone 1
+1.1.b — Template-Sensor: Statistik-Brücke (Neu)
+Da Statistik-Helfer keine direkten Input-Numbers akzeptieren, ist dieser "Übersetzer" zwingend erforderlich.
 
-1. **Helfer erstellen → Zahl**
-2. Name: `Solakon Offset Zone 1 dynamisch`
-3. Minimaler Wert: `0` / Maximaler Wert: `500`
-4. Einheit: `W` / Initialwert: `30`
-5. Entity ID: **`input_number.solakon_offset_zone1`**
+* Typ: Helfer → Template → Sensor erstellen
+* Name: Solakon Netz Brücke
+* ID: sensor.solakon_netz_brucke
+* Zustandstemplate:
 
-#### 1.3 — Statistik-Sensor: Standardabweichung
+{{ states('input_number.solakon_netz_spike_gefiltert') | float(0) }}
 
-1. **Helfer erstellen → Statistik**
-2. Name: `solakon_grid_stddev_60s`
-3. Eingabesensor: `input_number.solakon_grid_stable`
-4. Charakteristik: `Standardabweichung`
-5. Zeitraum: `00:01:00` (60 Sekunden)
-6. Maximale Anzahl an Messwerten: `30` (bei 2s Polling)
+* Maßeinheit: W
+* Zustandsklasse: Messung (measurement)
+* Geräteklasse: Leistung (power)
 
-#### 1.4 — Template-Sensor: Berechneter Offset
+1.2 — input_number: Dynamischer Offset Zone 1
 
-1. **Helfer erstellen → Template → Template für einen Sensor erstellen**
-2. Name: `Solakon Dynamischer Offset`
-3. Zustandstemplate:
+* Typ: Helfer → Zahl
+* Name: Solakon Offset Zone 1 dynamisch
+* ID: input_number.solakon_offset_zone_1_dynamisch
+* Werte: 0 bis 500 / Einheit: W / Initialwert: 30
 
-```jinja2
-{% set min_offset  = 30 %}
-{% set cap_offset  = 250 %}
-{% set noise_floor = 15 %}
-{% set factor      = 1.5 %}
+1.3 — Statistik-Sensor: Standardabweichung
 
+* Typ: Helfer → Statistik
+* Name: Solakon Grid StdDev 60s
+* ID: sensor.solakon_grid_stddev_60s
+* Eingabesensor: sensor.solakon_netz_brucke (Wichtig: Die Brücke wählen!)
+* Charakteristik: Standardabweichung
+* Zeitraum: 00:01:00
+
+1.4 — Template-Sensor: Berechneter Offset
+
+* Typ: Helfer → Template → Sensor erstellen
+* Name: Solakon Dynamischer Offset
+* ID: sensor.solakon_dynamischer_offset
+* Zustandstemplate:
+
+{% set min_offset  = states('input_number.solakon_offset_zone_1_dynamisch') | float(30) %}{% set cap_offset  = 250 %}{% set noise_floor = 15 %}{% set factor      = 1.5 %}
 {% set std_dev = states('sensor.solakon_grid_stddev_60s') | float(-1) %}
-
 {% if std_dev < 0 %}
-  {{ min_offset }}
-{% else %}
+  {{ min_offset }}{% else %}
   {% set volatility_buffer = [0, (std_dev - noise_floor) * factor] | max %}
   {% set result = (min_offset + volatility_buffer) | round(0) | int %}
-  {{ [[min_offset, result] | max, cap_offset] | min }}
-{% endif %}
+  {{ [[min_offset, result] | max, cap_offset] | min }}{% endif %}
 
-```
-
-4. Maßeinheit: `W` / Geräteklasse: `Leistung` / Symbol: `mdi:chart-bell-curve`
+* Maßeinheit: W / Geräteklasse: Leistung / Symbol: mdi:chart-bell-curve
 
 ---
 
@@ -96,9 +99,9 @@ Alle Komponenten werden direkt über die Benutzeroberfläche unter **Einstellung
 2. **"Solakon ONE — Dynamischer Offset"** auswählen.
 3. Sensoren zuordnen:
 * **Netz-Leistungssensor:** Dein Shelly (z. B. `sensor.shelly3em_total_power`)
-* **Spike-Filter Puffer:** `input_number.solakon_grid_stable`
-* **Berechneter Offset Sensor:** `sensor.solakon_dynamischer_offset`
-* **Ziel-Helper Offset Zone 1:** `input_number.solakon_offset_zone1`
+* **Spike-Filter Puffer:** 
+* **Berechneter Offset Sensor:** 
+* **Ziel-Helper Offset Zone 1:** 
 
 
 
@@ -106,7 +109,7 @@ Alle Komponenten werden direkt über die Benutzeroberfläche unter **Einstellung
 
 ### Schritt 4 — Nulleinspeisung verknüpfen
 
-Trage im **Solakon ONE Nulleinspeisung Blueprint** unter dem Feld **"Offset Zone 1 (Dynamisch)"** den Helfer `input_number.solakon_offset_zone1` ein.
+Trage im **Solakon ONE Nulleinspeisung Blueprint** unter dem Feld **"Offset Zone 1 (Dynamisch)"** den Helfer  ein.
 
 ---
 
