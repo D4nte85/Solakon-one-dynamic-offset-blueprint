@@ -1,6 +1,6 @@
 # ⚡ Solakon ONE — Dynamischer Offset Blueprint
 
-Dieser Blueprint ergänzt den [Solakon ONE Nulleinspeisung Blueprint](https://github.com/D4nte85/Solakon-One-Nulleinspeisung-Blueprint-homeassistant) um einen selbstanpassenden Nullpunkt-Offset. Anstatt einen festen Wert (z.B. 30 W) zu verwenden, misst der Offset-Regler kontinuierlich die Schwankungsbreite des Netzsignals und erhöht den Puffer automatisch — genau so weit wie nötig, um Einspeisung zu verhindern.
+Dieser Blueprint ergänzt den [Solakon ONE Nulleinspeisung Blueprint](https://github.com/D4nte85/Solakon-One-Nulleinspeisung-Blueprint-homeassistant) um einen selbstanpassenden Nullpunkt-Offset. Anstatt einen festen Wert (z. B. 30 W) zu verwenden, misst der Offset-Regler kontinuierlich die Schwankungsbreite des Netzsignals und erhöht den Puffer automatisch — genau so weit wie nötig, um Einspeisung zu verhindern.
 
 ---
 
@@ -10,150 +10,63 @@ Das System besteht aus zwei Teilen, die zusammenarbeiten:
 
 ### 1. Spike-Filter (im Blueprint)
 
-Der Roh-Netzwert (z.B. vom Shelly 3EM) kann kurze, sprunghafte Ausreißer enthalten — ein Gerät schaltet kurz ein und sofort wieder aus, ein MPPT-Regler takt kurz, oder der Sensor liefert einen Messfehler. Diese Spitzen würden ohne Filter die Statistik verfälschen und den Offset unnötig in die Höhe treiben.
+Der Roh-Netzwert (z. B. vom Shelly 3EM) kann kurze, sprunghafte Ausreißer enthalten. Der Spike-Filter verhindert, dass diese kurzen Spitzen die Statistik verfälschen:
 
-Der Spike-Filter funktioniert so:
+* Änderungen **kleiner als die Spike-Schwelle** (Standard: 200 W) werden sofort übernommen.
+* Änderungen **größer als die Spike-Schwelle** werden erst nach einer **Bestätigungszeit** (Standard: 3 s) übernommen, sofern der Wert stabil bleibt.
 
-- Jede Netzwertänderung wird sofort ausgewertet.
-- Ist der Sprung **kleiner als die Spike-Schwelle** (Standard: 200 W) → Wert wird sofort in den Puffer `input_number.solakon_grid_stable` geschrieben.
-- Ist der Sprung **größer als die Spike-Schwelle** → der Blueprint wartet die konfigurierte Bestätigungszeit (Standard: 3 s). Fällt der Wert vorher zurück, passiert nichts — der Spike wurde verworfen. Hält der Sprung an, handelt es sich um einen echten Lastsprung und er wird übernommen.
+### 2. Volatilitäts-Regler (Sensoren + Blueprint)
 
-### 2. Volatilitäts-Regler (Sensor + Blueprint)
+Ein Statistik-Sensor berechnet die **Standardabweichung (StdDev)** des gefilterten Netzwerts über die letzten 60 Sekunden. Daraus wird der dynamische Offset berechnet:
 
-Der `statistics`-Sensor berechnet die **Standardabweichung (StdDev)** des gefilterten Netzwerts über die letzten 60 Sekunden. Diese Zahl beschreibt, wie stark das Netz in der letzten Minute geschwankt hat.
+$$\text{Offset} = \max(\text{min\_offset}, \min(\text{cap\_offset}, \text{min\_offset} + \max(0, \text{StdDev} - \text{noise\_floor}) \times \text{factor}))$$
 
-Aus der StdDev berechnet der Blueprint dann den Offset nach dieser Formel:
-
-```
-Offset = max(min_offset,  min_offset + max(0, StdDev − noise_floor) × factor)
-         → begrenzt auf cap_offset
-```
-
-| Parameter | Standard | Bedeutung |
-|:----------|:---------|:----------|
-| `min_offset` | 30 W | Untergrenze — der Offset fällt nie darunter |
-| `noise_floor` | 15 W | StdDev darunter gilt als normales Rauschen, kein Aufschlag |
-| `factor` | 1.5 | Wie stark jedes Watt StdDev den Offset erhöht |
-| `cap_offset` | 250 W | Absolute Obergrenze |
-
-**Beispielwerte:**
-
-| Netz-StdDev | Berechneter Offset | Typisches Szenario |
-|:------------|:-------------------|:-------------------|
+| Netz-StdDev | Berechneter Offset (Beispiel) | Szenario |
+| --- | --- | --- |
 | 0–15 W | 30 W | Stabiles Netz, Nacht |
-| 20 W | 37 W | Kühlschrankkompressor |
 | 50 W | 82 W | Waschmaschine, Heizstab |
-| 100 W | 157 W | Starke unregelmäßige Last |
-| 143+ W | 250 W | Cap erreicht |
+| 143+ W | 250 W | Maximale Begrenzung (Cap) |
 
 ---
 
 ## 🛠️ Installation: Schritt für Schritt
 
-### Schritt 1 — Helper und Sensoren über die UI erstellen
+Alle Komponenten werden direkt über die Benutzeroberfläche unter **Einstellungen → Geräte & Dienste → Helfer** angelegt.
 
-Diese Komponenten müssen **vor** dem Blueprint-Import vorhanden sein. Alle werden über **Einstellungen → Geräte & Dienste → Helfer** angelegt.
-
----
+### Schritt 1 — Helfer und Sensoren erstellen
 
 #### 1.1 — input_number: Spike-Filter Puffer
 
-Speichert den spike-gefilterten Netzwert. Wird vom Blueprint sekündlich beschrieben.
-
-1. **Einstellungen → Geräte & Dienste → Helfer → Helfer erstellen → Zahl**
-2. Felder ausfüllen:
-
-| Feld | Wert |
-|:-----|:-----|
-| Name | `Solakon Netz spike-gefiltert` |
-| Minimaler Wert | `-10000` |
-| Maximaler Wert | `10000` |
-| Schrittweite | `1` |
-| Einheit | `W` |
-| Anzeigemodus | Eingabefeld |
-
-3. Speichern → Entity ID: **`input_number.solakon_grid_stable`**
-
----
+1. **Helfer erstellen → Zahl**
+2. Name: `Solakon Netz spike-gefiltert`
+3. Minimaler Wert: `-10000` / Maximaler Wert: `10000`
+4. Einheit: `W` / Anzeigemodus: `Eingabefeld`
+5. Entity ID: **`input_number.solakon_grid_stable`**
 
 #### 1.2 — input_number: Dynamischer Offset Zone 1
 
-Wird vom Blueprint beschrieben und im Nulleinspeisung-Blueprint als *Offset Zone 1 (Dynamisch)* eingetragen.
-
 1. **Helfer erstellen → Zahl**
-2. Felder ausfüllen:
+2. Name: `Solakon Offset Zone 1 dynamisch`
+3. Minimaler Wert: `0` / Maximaler Wert: `500`
+4. Einheit: `W` / Initialwert: `30`
+5. Entity ID: **`input_number.solakon_offset_zone1`**
 
-| Feld | Wert |
-|:-----|:-----|
-| Name | `Solakon Offset Zone 1 dynamisch` |
-| Minimaler Wert | `0` |
-| Maximaler Wert | `500` |
-| Schrittweite | `1` |
-| Einheit | `W` |
-| Initialwert | `30` |
+#### 1.3 — Statistik-Sensor: Standardabweichung
 
-3. Speichern → Entity ID: **`input_number.solakon_offset_zone1`**
+1. **Helfer erstellen → Statistik**
+2. Name: `solakon_grid_stddev_60s`
+3. Eingabesensor: `input_number.solakon_grid_stable`
+4. Charakteristik: `Standardabweichung`
+5. Zeitraum: `00:01:00` (60 Sekunden)
+6. Maximale Anzahl an Messwerten: `30` (bei 2s Polling)
 
----
+#### 1.4 — Template-Sensor: Berechneter Offset
 
-#### 1.3 — input_number: Dynamischer Offset Zone 2
+1. **Helfer erstellen → Template → Template für einen Sensor erstellen**
+2. Name: `Solakon Dynamischer Offset`
+3. Zustandstemplate:
 
-Identisch zu Zone 1, separat damit Zone 1 und Zone 2 später unabhängig angepasst werden können.
-
-1. **Helfer erstellen → Zahl**
-2. Felder ausfüllen:
-
-| Feld | Wert |
-|:-----|:-----|
-| Name | `Solakon Offset Zone 2 dynamisch` |
-| Minimaler Wert | `0` |
-| Maximaler Wert | `500` |
-| Schrittweite | `1` |
-| Einheit | `W` |
-| Initialwert | `30` |
-
-3. Speichern → Entity ID: **`input_number.solakon_offset_zone2`**
-
----
-
-1.4 — Statistik-Sensor über die UI erstellen
-
-Anstatt YAML zu editieren, nutzen wir den "Statistik"-Helfer:
-
-    Gehe zu Einstellungen → Geräte & Dienste → Helfer.
-
-    Klicke auf Helfer erstellen → Statistik.
-
-    Fülle die Felder wie folgt aus:
-
-        Name: solakon_grid_stddev_60s
-
-        Eingabesensor: input_number.solakon_grid_stable (der Helfer aus Schritt 1.1)
-
-        Charakteristik: Standardabweichung
-
-        Zeitraum: 00:01:00 (entspricht 60 Sekunden)
-
-        Maximale Anzahl an Messwerten: 30 (oder höher, falls dein Shelly sehr schnell sendet)
-
-    Speichern. Home Assistant erstellt nun automatisch sensor.solakon_grid_stddev_60s.
-
-1.5 — Template-Sensor über die UI erstellen
-
-Auch komplexe Berechnungen lassen sich jetzt direkt in der UI als Helfer anlegen:
-
-    Gehe zu Einstellungen → Geräte & Dienste → Helfer.
-
-    Klicke auf Helfer erstellen → Template → Template für einen Sensor erstellen.
-
-    Fülle die Felder aus:
-
-        Name: Solakon Dynamischer Offset
-
-        Zustandstemplate: Kopiere den folgenden Code-Block hinein:
-
-Code-Snippet
-
+```jinja2
 {% set min_offset  = 30 %}
 {% set cap_offset  = 250 %}
 {% set noise_floor = 15 %}
@@ -169,151 +82,54 @@ Code-Snippet
   {{ [[min_offset, result] | max, cap_offset] | min }}
 {% endif %}
 
-    Maßeinheit: W
-
-    Geräteklasse: Leistung
-
-    Zustandsklasse: Messung
-
-    Symbol: mdi:chart-bell-curve
-
-    Vorschau prüfen: Wenn dein System bereits läuft, siehst du rechts sofort das Ergebnis der Berechnung.
-
-    Speichern.
 ```
 
-> ℹ️ Die Formel-Parameter (`min_offset`, `cap_offset`, `noise_floor`, `factor`) im Template-Sensor sind **dekorative Standardwerte** für die Sensor-Anzeige. Die tatsächlich aktiven Werte werden direkt im Blueprint konfiguriert und dort bei jeder Berechnung verwendet — der Template-Sensor muss nach Parameteränderungen nicht angefasst werden.
-
-Nach einem weiteren **HA-Neustart** steht `sensor.solakon_dynamischer_offset` zur Verfügung.
+4. Maßeinheit: `W` / Geräteklasse: `Leistung` / Symbol: `mdi:chart-bell-curve`
 
 ---
 
 ### Schritt 2 — Blueprint importieren
 
-[![Open your Home Assistant instance and show the blueprint import dialog.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2FD4nte85%2FSolakon-one-dynamic-offset-blueprint%2Fblob%2Fmain%2Fsolakon_dynamic_offset_blueprint.yaml)
-
-Oder manuell: Die Datei `solakon_dynamic_offset_blueprint.yaml` in das Verzeichnis `config/blueprints/automation/` kopieren und Home Assistant neu laden (**Entwicklerwerkzeuge → YAML → Automatisierungen neu laden**).
-
 ---
 
-### Schritt 3 — Automatisierung aus Blueprint erstellen
+### Schritt 3 — Automatisierung erstellen
 
 1. **Einstellungen → Automatisierungen → Automatisierung erstellen → Blueprint**
-2. Blueprint **"Solakon ONE — Dynamischer Offset"** auswählen
-3. Konfiguration ausfüllen (Pflichtfelder sind markiert):
+2. **"Solakon ONE — Dynamischer Offset"** auswählen.
+3. Sensoren zuordnen:
+* **Netz-Leistungssensor:** Dein Shelly (z. B. `sensor.shelly3em_total_power`)
+* **Spike-Filter Puffer:** `input_number.solakon_grid_stable`
+* **Berechneter Offset Sensor:** `sensor.solakon_dynamischer_offset`
+* **Ziel-Helper Offset Zone 1:** `input_number.solakon_offset_zone1`
 
-**Sensoren:**
 
-| Feld | Wert |
-|:-----|:-----|
-| 🔌 Netz-Leistungssensor | Dein Shelly / Netz-Sensor (z.B. `sensor.shelly3em_channel_a_power`) |
-| 🗃️ Spike-Filter Puffer | `input_number.solakon_grid_stable` |
-| 📐 Berechneter Offset Sensor | `sensor.solakon_dynamischer_offset` |
-| 🎯 Ziel-Helper Offset Zone 1 | `input_number.solakon_offset_zone1` |
-| 🎯 Ziel-Helper Offset Zone 2 | `input_number.solakon_offset_zone2` |
-
-Alle anderen Felder können auf den Standardwerten belassen werden.
-
-4. Automatisierung speichern.
 
 ---
 
-### Schritt 4 — Nulleinspeisung Blueprint verknüpfen
+### Schritt 4 — Nulleinspeisung verknüpfen
 
-Im bereits konfigurierten **Solakon ONE Nulleinspeisung Blueprint** die dynamischen Offset-Entities eintragen:
-
-| Blueprint-Feld | Wert |
-|:---------------|:-----|
-| 🎯 Offset Zone 1 (Dynamisch) | `input_number.solakon_offset_zone1` |
-| 🎯 Offset Zone 2 (Dynamisch) | `input_number.solakon_offset_zone2` |
-
-Die statischen Offset-Werte im Nulleinspeisung-Blueprint bleiben als Fallback erhalten, werden aber automatisch überschrieben sobald der dynamische Offset aktiv ist.
+Trage im **Solakon ONE Nulleinspeisung Blueprint** unter dem Feld **"Offset Zone 1 (Dynamisch)"** den Helfer `input_number.solakon_offset_zone1` ein.
 
 ---
 
 ## ⚙️ Parameter-Referenz
 
-### 🔍 Spike-Filter
-
-| Parameter | Standard | Empfehlung |
-|:----------|:---------|:-----------|
-| **Spike-Schwelle** | 200 W | Nicht zu niedrig — sonst werden echte Lastsprünge verzögert |
-| **Bestätigungszeit** | 3 s | Entspricht der Anforderung: Spitzen < 3 s werden verworfen |
-| **Bestätigungstoleranz** | 100 W | ~50 % der Spike-Schwelle |
-
-### 📐 Offset-Formel
-
 | Parameter | Standard | Wirkung |
-|:----------|:---------|:--------|
-| **Mindest-Offset** | 30 W | Untergrenze — sollte dem statischen Offset im Nulleinspeisung-Blueprint entsprechen |
-| **noise_floor** | 15 W | Erhöhen wenn Offset zu früh steigt (rauschender Sensor) |
-| **Volatilitäts-Faktor** | 1.5 | Erhöhen für aggressivere Anpassung, senken für konservativere |
-| **Cap** | 250 W | Anpassen je nach Haushalt — bei großen Verbrauchern ggf. höher |
-
-### ✍️ Offset-Schreiber
-
-| Parameter | Standard | Wirkung |
-|:----------|:---------|:--------|
-| **Schreib-Hysterese** | 3 W | Verhindert Flackern bei minimalen StdDev-Änderungen |
-| **Logbuch-Schwelle** | 10 W | Auf 0 setzen für vollständiges Logging, erhöhen für ruhigeres Logbuch |
-| **Fallback-Intervall** | 60 s | Regelmäßiger Schreib-Trigger falls StdDev-Sensor sich nicht ändert |
-
----
-
-## 🔄 Zusammenspiel der Komponenten
-
-```
-Shelly 3EM (Roh)
-      │
-      ▼
-[Blueprint: Spike-Filter]
-  Sprung > 200 W? → 3 s warten → noch da? → übernehmen
-  Sprung ≤ 200 W? → sofort übernehmen
-      │
-      ▼
-input_number.solakon_grid_stable  (gefilterter Puffer)
-      │
-      ▼
-sensor.solakon_grid_stddev_60s    (Statistik: StdDev 60 s)
-      │
-      ▼
-sensor.solakon_dynamischer_offset (Template: Formel → Offset-Wert)
-      │
-      ▼
-[Blueprint: Offset-Schreiber]
-  Hysterese überschritten? → schreiben
-      │
-      ├─▶ input_number.solakon_offset_zone1
-      └─▶ input_number.solakon_offset_zone2
-                │
-                ▼
-    [Nulleinspeisung Blueprint]
-    liest diese Werte als dynamischen Offset
-```
-
----
-
-## ❓ Häufige Fragen
-
-**Der Offset bleibt dauerhaft bei 30 W, obwohl das Netz schwankt.**
-→ Prüfe ob `sensor.solakon_grid_stddev_60s` gültige Werte liefert. Der Sensor braucht nach einem Neustart ~60 s um erste Werte zu berechnen. Prüfe außerdem ob der Spike-Filter den gefilterten Wert korrekt in `input_number.solakon_grid_stable` schreibt (Entwicklerwerkzeuge → Zustände).
-
-**Der Offset steigt auch bei ruhigem Netz auf 50–60 W.**
-→ Der `noise_floor` ist zu niedrig für deinen Sensor. Erhöhe ihn auf 20–25 W.
-
-**Sprünge durch den Backofen / die Waschmaschine werden nicht übernommen.**
-→ Die `spike_confirm_tolerance` ist zu eng. Erhöhe sie auf 150 W, damit echte Lastsprünge auch bei leichtem Schwingen der Netzleistung bestätigt werden.
-
-**Ich möchte Zone 1 und Zone 2 unterschiedliche Offsets geben.**
-→ Derzeit schreibt der Blueprint beide Helper auf denselben Wert. Für unterschiedliche Offsets kann die Automatisierung dupliziert und jeweils ein anderer `volatility_factor` oder `min_offset` konfiguriert werden.
+| --- | --- | --- |
+| **Spike-Schwelle** | 200 W | Ab wann ein Sprung als "Spike" geprüft wird. |
+| **Bestätigungszeit** | 3 s | Wie lange ein Sprung stabil sein muss. |
+| **Mindest-Offset** | 30 W | Der Puffer bei absolut ruhigem Netz. |
+| **Noise Floor** | 15 W | Filtert Grundrauschen des Sensors aus der StdDev. |
+| **Volatilitäts-Faktor** | 1.5 | Multiplikator für die Schwankungsbreite. |
+| **Cap** | 250 W | Maximaler Offset, um Ertragseinbußen zu begrenzen. |
 
 ---
 
 ## 📋 Changelog
 
 ### V1
-- Spike-Filter mit konfigurierbarer Schwelle, Bestätigungszeit und -toleranz
-- Volatilitäts-Regler basierend auf 60-s-Standardabweichung
-- Schreib-Hysterese und Logbuch-Schwelle konfigurierbar
-- Fallback-Schreibintervall für stabile Netzphasen
-- `mode: parallel` — Spike-Filter und Schreiber blockieren sich nicht gegenseitig
+
+* Vollständige UI-Konfiguration möglich.
+* Spike-Filter mit Bestätigungslogik.
+* Dynamische Anpassung basierend auf 60s-Standardabweichung.
+* Hysterese-Schutz zur Schonung des Speichers/Logs.
