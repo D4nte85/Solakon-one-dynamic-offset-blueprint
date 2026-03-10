@@ -34,7 +34,7 @@ Stromzähler (roh)
       │
       ▼
 ┌─────────────────────┐
-│  Blueprint          │  Berechnet Offset intern (kein externer Sensor mehr)
+│  Blueprint          │  Berechnet Offset
 │  (Automation)       │  und schreibt in Zone 1 & Zone 2
 └─────────────────────┘
       │
@@ -52,7 +52,7 @@ Der Blueprint benötigt **4 externe Helfer**.
 | # | Typ | ID | Zweck |
 |---|-----|----|-------|
 | 1 | `input_number` | `solakon_netz_spike_gefiltert` | Spike-gefilterter Zwischenwert |
-| 2 | Template-Sensor | `solakon_netz_brucke` | Brücke für Statistik-Sensor (HA-Pflicht) |
+| 2 | Template-Sensor | `solakon_netz_brucke` | Brücke für Statistik-Sensor |
 | 3 | Statistik-Sensor | `solakon_grid_stddev_60s` | Standardabweichung über 60 s |
 | 4 | `input_number` | `solakon_offset_zone1` | Offset-Ausgabe für Zone 1 |
 | 5 | `input_number` | `solakon_offset_zone2` | Offset-Ausgabe für Zone 2 |
