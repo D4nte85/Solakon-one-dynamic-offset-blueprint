@@ -2,6 +2,16 @@
 
 > Ergänzt die Nulleinspeisung um einen selbstanpassenden Offset. Der Blueprint analysiert die Netzschwankungen der letzten 60 Sekunden und erhöht den Sicherheitspuffer automatisch, wenn das Netz unruhig ist — z.B. durch taktende Verbraucher wie Kompressoren oder Waschmaschinen.
 
+## Installation
+
+[![Blueprint importieren](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/D4nte85/Solakon-one-dynamic-offset-blueprint/main/solakon_dynamic_offset_blueprint.yaml)
+
+| | Link |
+|--|------|
+| 📦 GitHub | https://github.com/D4nte85/Solakon-one-dynamic-offset-blueprint |
+| 🔄 Import | https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/D4nte85/Solakon-one-dynamic-offset-blueprint/main/solakon_dynamic_offset_blueprint.yaml |
+| 📄 Blueprint (raw) | https://raw.githubusercontent.com/D4nte85/Solakon-one-dynamic-offset-blueprint/main/solakon_dynamic_offset_blueprint.yaml |
+
 ---
 
 ## Übersicht: Wie es funktioniert
@@ -42,7 +52,7 @@ Stromzähler (roh)
 
 ## Benötigte Helfer
 
-Der Blueprint benötigt **4 externe Helfer** (zuvor 6). Der `sensor.solakon_dynamischer_offset` entfällt — die Berechnung läuft jetzt intern im Blueprint.
+Der Blueprint benötigt **4 externe Helfer**.
 
 | # | Typ | ID | Zweck |
 |---|-----|----|-------|
