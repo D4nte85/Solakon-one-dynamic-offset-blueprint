@@ -116,65 +116,70 @@ Identisch zu Zone 1, separat damit Zone 1 und Zone 2 später unabhängig angepas
 
 ---
 
-#### 1.4 — Statistik-Sensor: Standardabweichung (60 s)
+1.4 — Statistik-Sensor über die UI erstellen
 
-Dieser Sensor berechnet die Standardabweichung des gefilterten Netzwerts der letzten 60 Sekunden. Er wird **nicht** über die Helfer-UI, sondern über die `configuration.yaml` angelegt, da der `statistics`-Plattformtyp im UI nicht verfügbar ist.
+Anstatt YAML zu editieren, nutzen wir den "Statistik"-Helfer:
 
-Füge folgendes in deine `configuration.yaml` ein (oder in ein eingebundenes Package):
+    Gehe zu Einstellungen → Geräte & Dienste → Helfer.
 
-```yaml
-sensor:
-  - platform: statistics
-    name: "solakon_grid_stddev_60s"
-    unique_id: solakon_grid_stddev_60s
-    entity_id: input_number.solakon_grid_stable
-    state_characteristic: standard_deviation
-    max_age:
-      seconds: 60
-    sampling_size: 30
-    precision: 1
-```
+    Klicke auf Helfer erstellen → Statistik.
 
-Nach einem **HA-Neustart** ist der Sensor unter `sensor.solakon_grid_stddev_60s` verfügbar.
+    Fülle die Felder wie folgt aus:
 
-> ℹ️ `sampling_size: 30` bei `max_age: 60s` entspricht einem Sample alle ~2 Sekunden — passend für typisches Shelly-Polling. Bei schnellerem Polling (< 1 s) kann `sampling_size` auf 60 erhöht werden.
+        Name: solakon_grid_stddev_60s
 
----
+        Eingabesensor: input_number.solakon_grid_stable (der Helfer aus Schritt 1.1)
 
-#### 1.5 — Template-Sensor: Berechneter Offset
+        Charakteristik: Standardabweichung
 
-Dieser Sensor berechnet den fertigen Offset-Wert aus der StdDev. Er dient als lesbare Zustandsanzeige und als Trigger für den Offset-Schreiber im Blueprint.
+        Zeitraum: 00:01:00 (entspricht 60 Sekunden)
 
-Ebenfalls in `configuration.yaml` einfügen:
+        Maximale Anzahl an Messwerten: 30 (oder höher, falls dein Shelly sehr schnell sendet)
 
-```yaml
-template:
-  - sensor:
-      - name: "Solakon Dynamischer Offset"
-        unique_id: solakon_dynamic_offset_v1
-        unit_of_measurement: W
-        device_class: power
-        icon: mdi:chart-bell-curve
-        state: >
-          {% set min_offset  = 30 %}
-          {% set cap_offset  = 250 %}
-          {% set noise_floor = 15 %}
-          {% set factor      = 1.5 %}
+    Speichern. Home Assistant erstellt nun automatisch sensor.solakon_grid_stddev_60s.
 
-          {% set std_dev = states('sensor.solakon_grid_stddev_60s') | float(-1) %}
+1.5 — Template-Sensor über die UI erstellen
 
-          {% if std_dev < 0 %}
-            {{ min_offset }}
-          {% else %}
-            {% set volatility_buffer = [0, (std_dev - noise_floor) * factor] | max %}
-            {% set result = (min_offset + volatility_buffer) | round(0) | int %}
-            {{ [[min_offset, result] | max, cap_offset] | min }}
-          {% endif %}
+Auch komplexe Berechnungen lassen sich jetzt direkt in der UI als Helfer anlegen:
 
-        attributes:
-          std_dev_60s:     "{{ states('sensor.solakon_grid_stddev_60s') | float(0) | round(1) }}"
-          grid_stable_now: "{{ states('input_number.solakon_grid_stable') | float(0) | round(0) }}"
-          last_updated:    "{{ now().strftime('%H:%M:%S') }}"
+    Gehe zu Einstellungen → Geräte & Dienste → Helfer.
+
+    Klicke auf Helfer erstellen → Template → Template für einen Sensor erstellen.
+
+    Fülle die Felder aus:
+
+        Name: Solakon Dynamischer Offset
+
+        Zustandstemplate: Kopiere den folgenden Code-Block hinein:
+
+Code-Snippet
+
+{% set min_offset  = 30 %}
+{% set cap_offset  = 250 %}
+{% set noise_floor = 15 %}
+{% set factor      = 1.5 %}
+
+{% set std_dev = states('sensor.solakon_grid_stddev_60s') | float(-1) %}
+
+{% if std_dev < 0 %}
+  {{ min_offset }}
+{% else %}
+  {% set volatility_buffer = [0, (std_dev - noise_floor) * factor] | max %}
+  {% set result = (min_offset + volatility_buffer) | round(0) | int %}
+  {{ [[min_offset, result] | max, cap_offset] | min }}
+{% endif %}
+
+    Maßeinheit: W
+
+    Geräteklasse: Leistung
+
+    Zustandsklasse: Messung
+
+    Symbol: mdi:chart-bell-curve
+
+    Vorschau prüfen: Wenn dein System bereits läuft, siehst du rechts sofort das Ergebnis der Berechnung.
+
+    Speichern.
 ```
 
 > ℹ️ Die Formel-Parameter (`min_offset`, `cap_offset`, `noise_floor`, `factor`) im Template-Sensor sind **dekorative Standardwerte** für die Sensor-Anzeige. Die tatsächlich aktiven Werte werden direkt im Blueprint konfiguriert und dort bei jeder Berechnung verwendet — der Template-Sensor muss nach Parameteränderungen nicht angefasst werden.
