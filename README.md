@@ -19,8 +19,6 @@ Der Roh-Netzwert (z. B. vom Shelly 3EM) kann kurze, sprunghafte Ausreißer entha
 
 Ein Statistik-Sensor berechnet die **Standardabweichung (StdDev)** des gefilterten Netzwerts über die letzten 60 Sekunden. Daraus wird der dynamische Offset berechnet:
 
-$$\text{Offset} = \max(\text{min\_offset}, \min(\text{cap\_offset}, \text{min\_offset} + \max(0, \text{StdDev} - \text{noise\_floor}) \times \text{factor}))$$
-
 | Netz-StdDev | Berechneter Offset (Beispiel) | Szenario |
 | --- | --- | --- |
 | 0–15 W | 30 W | Stabiles Netz, Nacht |
