@@ -1,436 +1,109 @@
 blueprint:
   name: Solakon ONE — Dynamischer Offset (Spike-Filter + Volatilitäts-Regler)
   description: |
-    ### Dynamischer Nullpunkt-Offset basierend auf Netzschwankungen
-
-    Dieser Blueprint ergänzt den **Solakon ONE Nulleinspeisung Blueprint** um einen
-    selbstanpassenden Offset, der die Netzschwankungen der letzten 60 Sekunden auswertet
-    und den Offset-Wert automatisch anpasst.
-
-    ---
-
-    ### ⚙️ Funktionsweise
-
-    **Spike-Filter:**
-    Sprünge im Netzwert von mehr als 200 W werden erst nach 3 Sekunden Bestätigung übernommen.
-    Fällt der Wert vorher zurück, wird er als kurzzeitige Spitze verworfen.
-    Der gefilterte Wert wird in `input_number.solakon_grid_stable` geschrieben.
-
-    **Volatilitätsmessung:**
-    Ein separater `statistics`-Sensor berechnet die Standardabweichung des gefilterten
-    Netzwerts über die letzten 60 Sekunden.
-
-    **Offset-Formel:**
-    ```
-    Offset = max(min_offset, min_offset + max(0, StdDev − noise_floor) × factor)
-    Cap: max. 250 W
-    ```
-
-    | StdDev   | Offset (Standard) | Typisches Szenario                  |
-    |:---------|:------------------|:------------------------------------|
-    | 0–15 W   | 30 W              | Stabiles Netz                       |
-    | 20 W     | 37 W              | Kühlschrank o.ä.                     |
-    | 50 W     | 82 W              | Waschmaschine, Backofen             |
-    | 100 W    | 157 W             | Starke Fluktuation                  |
-    | 143+ W   | 250 W             | Cap erreicht                        |
-
-    ---
-
-    ### 🛠️ Vorbereitung
-
-    Vor der Nutzung müssen folgende Entitäten bereits vorhanden sein:
-
-    - `input_number.solakon_grid_stable` — Spike-gefilterter Netzpuffer
-    - `sensor.solakon_grid_stddev_60s` — Statistik-Sensor (Standardabweichung)
-    - `sensor.solakon_dynamischer_offset` — Berechneter Offset-Wert
-    - `input_number.solakon_offset_zone1` — Ziel-Helper für Blueprint Zone 1
-    - `input_number.solakon_offset_zone2` — Ziel-Helper für Blueprint Zone 2
-
-    ---
-
-    ### 🔗 Blueprint-Verknüpfung
-
-    Im **Nulleinspeisung Blueprint** eintragen:
-    - **Offset Zone 1 (Dynamisch):** `input_number.solakon_offset_zone1`
-    - **Offset Zone 2 (Dynamisch):** `input_number.solakon_offset_zone2`
-
+    ### Dynamischer Nullpunkt-Offset
+    Filtert Netzspitzen und schreibt den berechneten dynamischen Offset in die Ziel-Helfer.
+    
+    **Voraussetzung:** Alle Sensoren aus der README müssen angelegt sein.
   domain: automation
-  source_url: https://github.com/D4nte85/Solakon-One-Nulleinspeisung-Blueprint-homeassistant
-
   input:
+    grid_power_sensor:
+      name: 🔌 Netz-Leistungssensor
+      description: Der rohe Sensor vom Stromzähler (z.B. Shelly 3EM).
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+    grid_stable_helper:
+      name: 🗃️ Spike-Filter Puffer
+      default: input_number.solakon_netz_spike_gefiltert
+      selector:
+        entity:
+          domain: input_number
+    offset_sensor:
+      name: 📐 Berechneter Offset Sensor
+      default: sensor.solakon_dynamischer_offset
+      selector:
+        entity:
+          domain: sensor
+    offset_zone1_helper:
+      name: 🎯 Ziel-Helper Offset Zone 1
+      default: input_number.solakon_offset_zone1
+      selector:
+        entity:
+          domain: input_number
+    offset_zone2_helper:
+      name: 🎯 Ziel-Helper Offset Zone 2
+      default: input_number.solakon_offset_zone2
+      selector:
+        entity:
+          domain: input_number
+    spike_threshold:
+      name: ⚡ Spike-Schwelle (W)
+      default: 200
+      selector:
+        number:
+          min: 50
+          max: 1000
+          unit_of_measurement: W
+    spike_confirm_time:
+      name: ⏱️ Bestätigungszeit (s)
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 10
+          unit_of_measurement: s
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # 🔌 SENSOREN
-    # ═══════════════════════════════════════════════════════════════════════════
-    sensor_entities:
-      name: "🔌 SENSOREN:"
-      description: "Quell- und Ziel-Entitäten für Spike-Filter und Offset-Schreiber."
-      collapsed: false
-      input:
+mode: restart # Wichtig: Neustart bricht Bestätigungs-Warten bei neuem Wert ab
 
-        grid_power_sensor:
-          name: 🔌 Netz-Leistungssensor (ERFORDERLICH)
-          description: |
-            Derselbe Sensor wie im Nulleinspeisung-Blueprint (z.B. Shelly 3EM).
-            ⚠️ Positive Werte = Bezug, Negative Werte = Einspeisung.
-          selector:
-            entity:
-              domain: sensor
-              device_class: power
-
-        grid_stable_helper:
-          name: 🗃️ Spike-Filter Puffer (input_number)
-          description: |
-            Der gefilterte Zwischenpuffer.
-            Standard Entity ID: `input_number.solakon_grid_stable`
-          default: input_number.solakon_grid_stable
-          selector:
-            entity:
-              domain: input_number
-
-        offset_sensor:
-          name: 📐 Berechneter Offset Sensor (Template)
-          description: |
-            Der Template-Sensor mit dem berechneten Offset-Wert — dient als Trigger.
-            Standard Entity ID: `sensor.solakon_dynamischer_offset`
-          default: sensor.solakon_dynamischer_offset
-          selector:
-            entity:
-              domain: sensor
-
-        stddev_sensor:
-          name: 📊 Standardabweichungs-Sensor (Statistik)
-          description: |
-            Der statistics-Sensor mit der 60s-Standardabweichung des gefilterten Netzwerts.
-            Standard Entity ID: `sensor.solakon_grid_stddev_60s`
-          default: sensor.solakon_grid_stddev_60s
-          selector:
-            entity:
-              domain: sensor
-
-        offset_zone1_helper:
-          name: 🎯 Ziel-Helper Offset Zone 1 (input_number)
-          description: |
-            Der input_number Helper, der im Nulleinspeisung-Blueprint als
-            "Offset Zone 1 (Dynamisch)" eingetragen ist.
-            Standard Entity ID: `input_number.solakon_offset_zone1`
-          default: input_number.solakon_offset_zone1
-          selector:
-            entity:
-              domain: input_number
-
-        offset_zone2_helper:
-          name: 🎯 Ziel-Helper Offset Zone 2 (input_number)
-          description: |
-            Der input_number Helper, der im Nulleinspeisung-Blueprint als
-            "Offset Zone 2 (Dynamisch)" eingetragen ist.
-            Standard Entity ID: `input_number.solakon_offset_zone2`
-          default: input_number.solakon_offset_zone2
-          selector:
-            entity:
-              domain: input_number
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # 🔍 SPIKE-FILTER PARAMETER
-    # ═══════════════════════════════════════════════════════════════════════════
-    spike_filter_params:
-      name: "🔍 SPIKE-FILTER PARAMETER:"
-      description: "Steuert, ab wann ein Netzsprung als Spike gilt und verworfen wird."
-      collapsed: true
-      input:
-
-        spike_threshold:
-          name: ⚡ Spike-Schwelle (W)
-          description: |
-            Sprünge größer als dieser Wert (W) gelten zunächst als Spike.
-            Sie werden erst nach Ablauf der Bestätigungszeit übernommen.
-          default: 200
-          selector:
-            number:
-              min: 50
-              max: 1000
-              step: 10
-              unit_of_measurement: W
-
-        spike_confirm_time:
-          name: ⏱️ Bestätigungszeit (s)
-          description: |
-            Ein Sprung über der Spike-Schwelle muss diese Dauer stabil anhalten,
-            um als echter Lastsprung übernommen zu werden.
-            Kürzere Sprünge werden als Spitze verworfen.
-          default: 3
-          selector:
-            number:
-              min: 1
-              max: 10
-              step: 1
-              unit_of_measurement: s
-
-        spike_confirm_tolerance:
-          name: 📏 Bestätigungstoleranz (W)
-          description: |
-            Nach der Bestätigungszeit: Wie weit darf der aktuelle Wert vom
-            ursprünglichen Sprungwert abweichen, damit er noch als bestätigt gilt?
-            Empfehlung: 50 % der Spike-Schwelle.
-          default: 100
-          selector:
-            number:
-              min: 10
-              max: 500
-              step: 10
-              unit_of_measurement: W
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # 📐 OFFSET-FORMEL PARAMETER
-    # ═══════════════════════════════════════════════════════════════════════════
-    offset_formula_params:
-      name: "📐 OFFSET-FORMEL PARAMETER:"
-      description: "Steuert wie stark Netzschwankungen den Offset beeinflussen."
-      collapsed: true
-      input:
-
-        min_offset:
-          name: 📉 Mindest-Offset (W)
-          description: |
-            Untergrenze des Offsets — wird auch bei stabilem Netz nie unterschritten.
-            Entspricht dem statischen Offset im Nulleinspeisung-Blueprint.
-          default: 30
-          selector:
-            number:
-              min: 0
-              max: 200
-              step: 5
-              unit_of_measurement: W
-
-        noise_floor:
-          name: 🔇 Rausch-Schwelle / noise_floor (W)
-          description: |
-            Standardabweichungen unterhalb dieses Werts gelten als normales Sensor-Rauschen
-            und lösen keinen Offset-Aufschlag aus.
-            Empfehlung: 10–20 W.
-          default: 15
-          selector:
-            number:
-              min: 0
-              max: 100
-              step: 5
-              unit_of_measurement: W
-
-        volatility_factor:
-          name: 📈 Volatilitäts-Faktor
-          description: |
-            Multiplikator für den Offset-Aufschlag pro Watt StdDev über dem noise_floor.
-            Höher = aggressivere Anpassung | Niedriger = konservativere Anpassung.
-            Empfehlung: 1.0–2.0.
-          default: 1.5
-          selector:
-            number:
-              min: 0.5
-              max: 5.0
-              step: 0.1
-
-        cap_offset:
-          name: 🔒 Maximaler Offset / Cap (W)
-          description: |
-            Absolute Obergrenze des dynamischen Offsets.
-            Schützt vor übermäßig konservativer Regelung bei extremen Schwankungen.
-          default: 250
-          selector:
-            number:
-              min: 50
-              max: 500
-              step: 10
-              unit_of_measurement: W
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # ✍️ OFFSET-SCHREIBER PARAMETER
-    # ═══════════════════════════════════════════════════════════════════════════
-    writer_params:
-      name: "✍️ OFFSET-SCHREIBER PARAMETER:"
-      description: "Steuert wann und wie der Offset in die Ziel-Helper geschrieben wird."
-      collapsed: true
-      input:
-
-        write_hysteresis:
-          name: 📏 Schreib-Hysterese (W)
-          description: |
-            Mindeständerung (W) die erreicht werden muss, damit der Offset
-            neu in die Helper geschrieben wird.
-            Verhindert unnötiges Flackern bei minimalen Schwankungen.
-          default: 3
-          selector:
-            number:
-              min: 1
-              max: 20
-              step: 1
-              unit_of_measurement: W
-
-        log_threshold:
-          name: 📋 Logbuch-Schwelle (W)
-          description: |
-            Ab dieser Änderungsgröße (W) wird ein Logbuch-Eintrag geschrieben.
-            0 = immer loggen.
-          default: 10
-          selector:
-            number:
-              min: 0
-              max: 100
-              step: 5
-              unit_of_measurement: W
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# MODUS: parallel — Spike-Filter und Schreiber laufen unabhängig
-# ─────────────────────────────────────────────────────────────────────────────
-mode: parallel
-max: 10
-max_exceeded: silent
-
-
-variables:
-  # Inputs
-  grid_power_entity:       !input grid_power_sensor
-  grid_stable_entity:      !input grid_stable_helper
-  offset_sensor_entity:    !input offset_sensor
-  stddev_sensor_entity:    !input stddev_sensor
-  offset_z1_entity:        !input offset_zone1_helper
-  offset_z2_entity:        !input offset_zone2_helper
-
-  spike_thresh:            !input spike_threshold
-  spike_confirm:           !input spike_confirm_time
-  spike_tol:               !input spike_confirm_tolerance
-
-  min_off:                 !input min_offset
-  noise_fl:                !input noise_floor
-  vol_factor:              !input volatility_factor
-  cap_off:                 !input cap_offset
-
-  hysteresis:              !input write_hysteresis
-  log_thresh:              !input log_threshold
-
-
-triggers:
-  # ── Spike-Filter: jede Netz-Wertänderung ──────────────────────────────────
-  - trigger: state
+trigger:
+  - platform: state
     entity_id: !input grid_power_sensor
-    id: grid_changed
-
-  # ── Offset-Schreiber: Sensor-Änderung ─────────────────────────────────────
-  - trigger: state
+  - platform: state
     entity_id: !input offset_sensor
-    id: offset_changed
-
-  # ── Offset-Schreiber: Fallback alle 60 s ──────────────────────────────────
-  - trigger: time_pattern
-    minutes: "/1"
-    id: offset_fallback
-
 
 action:
-
-  # ===========================================================================
-  # TEIL 1: SPIKE-FILTER
-  # Nur ausführen bei grid_changed-Trigger
-  # ===========================================================================
   - choose:
+      # Zweig 1: Spike-Filterung für Netz-Sensor
       - conditions:
-          - condition: trigger
-            id: grid_changed
+          - condition: template
+            value_template: "{{ trigger.entity_id == grid_power_sensor.entity_id if grid_power_sensor is string else trigger.entity_id == grid_power_sensor }}"
         sequence:
-
-          - variables:
-              new_val:  "{{ states(grid_power_entity) | float(0) }}"
-              old_val:  "{{ states(grid_stable_entity) | float(0) }}"
-              delta:    "{{ (new_val - old_val) | abs }}"
-
-          - choose:
-
-              # ── SPIKE erkannt: Warten und Bestätigen ────────────────────────
-              - conditions:
-                  - condition: template
-                    value_template: "{{ delta > spike_thresh }}"
-                sequence:
-                  - delay:
-                      seconds: "{{ spike_confirm }}"
-
-                  # Bestätigung: Ist der Wert nach der Wartezeit immer noch da?
-                  - condition: template
-                    value_template: >
-                      {% set current = states(grid_power_entity) | float(0) %}
-                      {{ (current - new_val) | abs < spike_tol }}
-
-                  # Echter Lastsprung bestätigt → übernehmen
-                  - service: input_number.set_value
-                    data:
-                      entity_id: "{{ grid_stable_entity }}"
-                      value: >
-                        {{ states(grid_power_entity) | float(0) | round(0) }}
-
-            # ── Normaler Wert: sofort schreiben ──────────────────────────────
-            default:
+          - alias: "Prüfe ob Sprung groß genug für Spike-Verdacht"
+            if:
+              - condition: template
+                value_template: >
+                  {% set current = states(grid_power_sensor) | float(0) %}
+                  {% set stable = states(grid_stable_helper) | float(0) %}
+                  {{ (current - stable) | abs > (spike_threshold | float) }}
+            then:
+              - delay: !input spike_confirm_time
               - service: input_number.set_value
+                target:
+                  entity_id: !input grid_stable_helper
                 data:
-                  entity_id: "{{ grid_stable_entity }}"
-                  value: "{{ new_val | round(0) }}"
+                  value: "{{ states(grid_power_sensor) | float(0) }}"
+            else:
+              - service: input_number.set_value
+                target:
+                  entity_id: !input grid_stable_helper
+                data:
+                  value: "{{ states(grid_power_sensor) | float(0) }}"
 
-
-  # ===========================================================================
-  # TEIL 2: OFFSET-SCHREIBER
-  # Ausführen bei offset_changed ODER offset_fallback
-  # ===========================================================================
-  - choose:
+      # Zweig 2: Schreiben des berechneten Offsets in die Zonen
       - conditions:
-          - condition: trigger
-            id:
-              - offset_changed
-              - offset_fallback
+          - condition: template
+            value_template: "{{ trigger.entity_id == offset_sensor.entity_id if offset_sensor is string else trigger.entity_id == offset_sensor }}"
         sequence:
-
-          # ── Sensor-Verfügbarkeit prüfen: kein Schreiben bei unavailable ────
-          - condition: template
-            value_template: >
-              {{ states(stddev_sensor_entity) not in ['unavailable', 'unknown', 'none', ''] }}
-
-          - variables:
-              std_dev_raw: >
-                {{ states(stddev_sensor_entity) | float(-1) }}
-              computed_offset: >
-                {% if std_dev_raw < 0 %}
-                  {{ min_off }}
-                {% else %}
-                  {% set buf = [0, (std_dev_raw - noise_fl) * vol_factor] | max %}
-                  {% set res = (min_off + buf) | round(0) | int %}
-                  {{ [[min_off, res] | max, cap_off] | min }}
-                {% endif %}
-              current_z1: "{{ states(offset_z1_entity) | float(min_off) }}"
-              current_z2: "{{ states(offset_z2_entity) | float(min_off) }}"
-
-          # Nur schreiben wenn Hysterese überschritten
-          - condition: template
-            value_template: >
-              {{ (computed_offset - current_z1) | abs > hysteresis
-              or (computed_offset - current_z2) | abs > hysteresis }}
-
           - service: input_number.set_value
+            target:
+              entity_id: !input offset_zone1_helper
             data:
-              entity_id: "{{ offset_z1_entity }}"
-              value: "{{ computed_offset }}"
-
+              value: "{{ states(offset_sensor) | float(30) }}"
           - service: input_number.set_value
+            target:
+              entity_id: !input offset_zone2_helper
             data:
-              entity_id: "{{ offset_z2_entity }}"
-              value: "{{ computed_offset }}"
+              value: "{{ states(offset_sensor) | float(30) }}"
 
-          # Logbuch-Eintrag bei signifikanter Änderung
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ log_thresh == 0 or (computed_offset - current_z1) | abs > log_thresh }}"
-                sequence:
-                  - service: logbook.log
-                    data:
-                      name: Solakon Dynamischer Offset
-                      message: >
-                        📐 Offset angepasst: {{ current_z1 | round(0) }} W → {{ computed_offset }} W
-                        (StdDev 60s: {{ std_dev_raw | round(1) if std_dev_raw >= 0 else 'n/v' }} W
-                        | noise_floor: {{ noise_fl }} W | factor: {{ vol_factor }})
