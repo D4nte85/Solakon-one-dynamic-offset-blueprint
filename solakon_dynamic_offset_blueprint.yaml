@@ -2,11 +2,10 @@ blueprint:
   name: Solakon ONE — Dynamischer Offset (Spike-Filter + Volatilitäts-Regler)
   description: |
     ### Dynamischer Nullpunkt-Offset
-    Filtert Netzspitzen und schreibt den berechneten dynamischen Offset direkt
-    in die Ziel-Helfer. Der Offset-Sensor (sensor.solakon_dynamischer_offset)
-    wird **nicht** mehr benötigt — Berechnung erfolgt intern.
+    Filtert Netzspitzen und schreibt den berechneten dynamischen Offset
+    in die Ziel-Helfer.
 
-    **Erforderliche Helfer (README Schritte 1–3 + 5):**
+    **Erforderliche Helfer:**
     - `input_number.solakon_netz_spike_gefiltert`
     - `sensor.solakon_netz_brucke`
     - `sensor.solakon_grid_stddev_60s`
@@ -96,7 +95,7 @@ blueprint:
 # Neustart bricht laufendes Spike-Bestätigungs-Delay ab, wenn neuer Wert kommt
 mode: restart
 
-# Blueprint-Inputs als Template-Variablen deklarieren (Fix: zuverlässig in allen Kontexten)
+# Blueprint-Inputs als Template-Variablen deklarieren
 variables:
   grid_power_sensor: !input grid_power_sensor
   grid_stable_helper: !input grid_stable_helper
