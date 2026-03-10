@@ -12,9 +12,9 @@ blueprint:
     ### ⚙️ Funktionsweise
 
     **Spike-Filter:**
-    Sprünge im Netzwert von mehr als 200 W werden erst nach 3 Sekunden bestätigung übernommen.
+    Sprünge im Netzwert von mehr als 200 W werden erst nach 3 Sekunden Bestätigung übernommen.
     Fällt der Wert vorher zurück, wird er als kurzzeitige Spitze verworfen.
-    Der gefilterte Wert wird in `input_number.solakon_netz_spike_gefiltert` geschrieben.
+    Der gefilterte Wert wird in `input_number.solakon_grid_stable` geschrieben.
 
     **Volatilitätsmessung:**
     Ein separater `statistics`-Sensor berechnet die Standardabweichung des gefilterten
@@ -38,22 +38,21 @@ blueprint:
 
     ### 🛠️ Vorbereitung
 
-    Vor der Nutzung müssen folgende Entitäten aus `solakon_dynamic_offset_sensors.yaml`
-    bereits vorhanden sein:
+    Vor der Nutzung müssen folgende Entitäten bereits vorhanden sein:
 
-    - `input_number.solakon_netz_spike_gefiltert` — Spike-gefilterter Netzpuffer
+    - `input_number.solakon_grid_stable` — Spike-gefilterter Netzpuffer
     - `sensor.solakon_grid_stddev_60s` — Statistik-Sensor (Standardabweichung)
     - `sensor.solakon_dynamischer_offset` — Berechneter Offset-Wert
-    - `input_number.solakon_offset_zone_1_dynamisch` — Ziel-Helper für Blueprint Zone 1
-    - `input_number.solakon_offset_zone_2_dynamisch` — Ziel-Helper für Blueprint Zone 2
+    - `input_number.solakon_offset_zone1` — Ziel-Helper für Blueprint Zone 1
+    - `input_number.solakon_offset_zone2` — Ziel-Helper für Blueprint Zone 2
 
     ---
 
     ### 🔗 Blueprint-Verknüpfung
 
     Im **Nulleinspeisung Blueprint** eintragen:
-    - **Offset Zone 1 (Dynamisch):** `input_number.solakon_offset_zone_1_dynamisch`
-    - **Offset Zone 2 (Dynamisch):** `input_number.solakon_offset_zone_2_dynamisch`
+    - **Offset Zone 1 (Dynamisch):** `input_number.solakon_offset_zone1`
+    - **Offset Zone 2 (Dynamisch):** `input_number.solakon_offset_zone2`
 
   domain: automation
   source_url: https://github.com/D4nte85/Solakon-One-Nulleinspeisung-Blueprint-homeassistant
@@ -82,8 +81,9 @@ blueprint:
         grid_stable_helper:
           name: 🗃️ Spike-Filter Puffer (input_number)
           description: |
-            Der gefilterte Zwischenpuffer. Aus `solakon_dynamic_offset_sensors.yaml`.
-          default: input_number.solakon_netz_spike_gefiltert
+            Der gefilterte Zwischenpuffer.
+            Standard Entity ID: `input_number.solakon_grid_stable`
+          default: input_number.solakon_grid_stable
           selector:
             entity:
               domain: input_number
@@ -92,7 +92,7 @@ blueprint:
           name: 📐 Berechneter Offset Sensor (Template)
           description: |
             Der Template-Sensor mit dem berechneten Offset-Wert — dient als Trigger.
-            Entity ID aus `solakon_dynamic_offset_sensors.yaml`: `sensor.solakon_dynamischer_offset`
+            Standard Entity ID: `sensor.solakon_dynamischer_offset`
           default: sensor.solakon_dynamischer_offset
           selector:
             entity:
@@ -102,7 +102,7 @@ blueprint:
           name: 📊 Standardabweichungs-Sensor (Statistik)
           description: |
             Der statistics-Sensor mit der 60s-Standardabweichung des gefilterten Netzwerts.
-            Entity ID aus `solakon_dynamic_offset_sensors.yaml`: `sensor.solakon_grid_stddev_60s`
+            Standard Entity ID: `sensor.solakon_grid_stddev_60s`
           default: sensor.solakon_grid_stddev_60s
           selector:
             entity:
@@ -113,7 +113,8 @@ blueprint:
           description: |
             Der input_number Helper, der im Nulleinspeisung-Blueprint als
             "Offset Zone 1 (Dynamisch)" eingetragen ist.
-          default: input_number.solakon_offset_zone_1_dynamisch
+            Standard Entity ID: `input_number.solakon_offset_zone1`
+          default: input_number.solakon_offset_zone1
           selector:
             entity:
               domain: input_number
@@ -123,7 +124,8 @@ blueprint:
           description: |
             Der input_number Helper, der im Nulleinspeisung-Blueprint als
             "Offset Zone 2 (Dynamisch)" eingetragen ist.
-          default: input_number.solakon_offset_zone_2_dynamisch
+            Standard Entity ID: `input_number.solakon_offset_zone2`
+          default: input_number.solakon_offset_zone2
           selector:
             entity:
               domain: input_number
@@ -277,7 +279,6 @@ blueprint:
               unit_of_measurement: W
 
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # MODUS: parallel — Spike-Filter und Schreiber laufen unabhängig
 # ─────────────────────────────────────────────────────────────────────────────
@@ -319,7 +320,7 @@ triggers:
     entity_id: !input offset_sensor
     id: offset_changed
 
-  # ── Offset-Schreiber: Fallback alle 60 s (time_pattern unterstützt keine Variablen) ──
+  # ── Offset-Schreiber: Fallback alle 60 s ──────────────────────────────────
   - trigger: time_pattern
     minutes: "/1"
     id: offset_fallback
@@ -385,9 +386,12 @@ action:
               - offset_fallback
         sequence:
 
+          # ── Sensor-Verfügbarkeit prüfen: kein Schreiben bei unavailable ────
+          - condition: template
+            value_template: >
+              {{ states(stddev_sensor_entity) not in ['unavailable', 'unknown', 'none', ''] }}
+
           - variables:
-              # Offset direkt aus konfiguriertem StdDev-Sensor berechnen —
-              # Blueprint-Parameter wirken damit sofort ohne HA-Neustart
               std_dev_raw: >
                 {{ states(stddev_sensor_entity) | float(-1) }}
               computed_offset: >
