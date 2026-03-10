@@ -46,7 +46,7 @@ blueprint:
           domain: input_number
     spike_threshold:
       name: ⚡ Spike-Schwelle (W)
-      default: 200
+      default: 300
       selector:
         number:
           min: 50
