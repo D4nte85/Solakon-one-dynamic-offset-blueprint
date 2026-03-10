@@ -2,14 +2,20 @@ blueprint:
   name: Solakon ONE — Dynamischer Offset (Spike-Filter + Volatilitäts-Regler)
   description: |
     ### Dynamischer Nullpunkt-Offset
-    Filtert Netzspitzen und schreibt den berechneten dynamischen Offset in die Ziel-Helfer.
-    
-    **Voraussetzung:** Alle Sensoren aus der README müssen angelegt sein.
+    Filtert Netzspitzen und schreibt den berechneten dynamischen Offset direkt
+    in die Ziel-Helfer. Der Offset-Sensor (sensor.solakon_dynamischer_offset)
+    wird **nicht** mehr benötigt — Berechnung erfolgt intern.
+
+    **Erforderliche Helfer (README Schritte 1–3 + 5):**
+    - `input_number.solakon_netz_spike_gefiltert`
+    - `sensor.solakon_netz_brucke`
+    - `sensor.solakon_grid_stddev_60s`
+    - `input_number.solakon_offset_zone1` / `_zone2`
   domain: automation
   input:
     grid_power_sensor:
       name: 🔌 Netz-Leistungssensor
-      description: Der rohe Sensor vom Stromzähler (z.B. Shelly 3EM).
+      description: Roher Sensor vom Stromzähler (z.B. Shelly 3EM).
       selector:
         entity:
           domain: sensor
@@ -20,9 +26,9 @@ blueprint:
       selector:
         entity:
           domain: input_number
-    offset_sensor:
-      name: 📐 Berechneter Offset Sensor
-      default: sensor.solakon_dynamischer_offset
+    stddev_sensor:
+      name: 📊 Statistik-Sensor (StdDev 60s)
+      default: sensor.solakon_grid_stddev_60s
       selector:
         entity:
           domain: sensor
@@ -54,56 +60,102 @@ blueprint:
           min: 1
           max: 10
           unit_of_measurement: s
+    min_offset:
+      name: 📉 Minimaler Offset (W)
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 200
+          unit_of_measurement: W
+    cap_offset:
+      name: 📈 Maximaler Offset (W)
+      default: 250
+      selector:
+        number:
+          min: 50
+          max: 1000
+          unit_of_measurement: W
+    noise_floor:
+      name: 🔇 Rausch-Schwelle (W)
+      default: 15
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: W
+    volatility_factor:
+      name: 📊 Volatilitäts-Faktor
+      default: 1.5
+      selector:
+        number:
+          min: 0.5
+          max: 5.0
+          step: 0.1
 
-mode: restart # Wichtig: Neustart bricht Bestätigungs-Warten bei neuem Wert ab
+# Neustart bricht laufendes Spike-Bestätigungs-Delay ab, wenn neuer Wert kommt
+mode: restart
+
+# Blueprint-Inputs als Template-Variablen deklarieren (Fix: zuverlässig in allen Kontexten)
+variables:
+  grid_power_sensor: !input grid_power_sensor
+  grid_stable_helper: !input grid_stable_helper
+  stddev_sensor: !input stddev_sensor
+  spike_threshold: !input spike_threshold
+  spike_confirm_time: !input spike_confirm_time
+  min_offset: !input min_offset
+  cap_offset: !input cap_offset
+  noise_floor: !input noise_floor
+  volatility_factor: !input volatility_factor
 
 trigger:
   - platform: state
     entity_id: !input grid_power_sensor
-  - platform: state
-    entity_id: !input offset_sensor
 
 action:
-  - choose:
-      # Zweig 1: Spike-Filterung für Netz-Sensor
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger.entity_id == grid_power_sensor.entity_id if grid_power_sensor is string else trigger.entity_id == grid_power_sensor }}"
-        sequence:
-          - alias: "Prüfe ob Sprung groß genug für Spike-Verdacht"
-            if:
-              - condition: template
-                value_template: >
-                  {% set current = states(grid_power_sensor) | float(0) %}
-                  {% set stable = states(grid_stable_helper) | float(0) %}
-                  {{ (current - stable) | abs > (spike_threshold | float) }}
-            then:
-              - delay: !input spike_confirm_time
-              - service: input_number.set_value
-                target:
-                  entity_id: !input grid_stable_helper
-                data:
-                  value: "{{ states(grid_power_sensor) | float(0) }}"
-            else:
-              - service: input_number.set_value
-                target:
-                  entity_id: !input grid_stable_helper
-                data:
-                  value: "{{ states(grid_power_sensor) | float(0) }}"
+  # ── Schritt 1: Spike-Filterung ─────────────────────────────────────────────
+  - if:
+      - condition: template
+        value_template: >
+          {{ (states(grid_power_sensor) | float(0) - states(grid_stable_helper) | float(0)) | abs
+             > spike_threshold | float(200) }}
+    then:
+      # Sprung zu groß → warten ob Wert stabil bleibt (Spike-Bestätigung)
+      - delay:
+          seconds: "{{ spike_confirm_time | int(3) }}"
+      - action: input_number.set_value
+        target:
+          entity_id: !input grid_stable_helper
+        data:
+          value: "{{ states(grid_power_sensor) | float(0) }}"
+    else:
+      # Normaler Wert → sofort übernehmen
+      - action: input_number.set_value
+        target:
+          entity_id: !input grid_stable_helper
+        data:
+          value: "{{ states(grid_power_sensor) | float(0) }}"
 
-      # Zweig 2: Schreiben des berechneten Offsets in die Zonen
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger.entity_id == offset_sensor.entity_id if offset_sensor is string else trigger.entity_id == offset_sensor }}"
-        sequence:
-          - service: input_number.set_value
-            target:
-              entity_id: !input offset_zone1_helper
-            data:
-              value: "{{ states(offset_sensor) | float(30) }}"
-          - service: input_number.set_value
-            target:
-              entity_id: !input offset_zone2_helper
-            data:
-              value: "{{ states(offset_sensor) | float(30) }}"
+  # ── Schritt 2: Dynamischen Offset inline berechnen ─────────────────────────
+  - variables:
+      dynamic_offset: >
+        {% set std_dev = states(stddev_sensor) | float(-1) %}
+        {% if std_dev < 0 %}
+          {{ min_offset | int(30) }}
+        {% else %}
+          {% set volatility_buffer = [0, (std_dev - noise_floor) * volatility_factor] | max %}
+          {% set result = (min_offset + volatility_buffer) | round(0) | int %}
+          {{ [[min_offset | int(30), result] | max, cap_offset | int(250)] | min }}
+        {% endif %}
 
+  # ── Schritt 3: Offset in beide Zonen schreiben ─────────────────────────────
+  - action: input_number.set_value
+    target:
+      entity_id: !input offset_zone1_helper
+    data:
+      value: "{{ dynamic_offset }}"
+  - action: input_number.set_value
+    target:
+      entity_id: !input offset_zone2_helper
+    data:
+      value: "{{ dynamic_offset }}"
