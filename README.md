@@ -152,7 +152,7 @@ Der Blueprint benötigt **4 externe Helfer**.
 
 | Parameter | Standard | Beschreibung |
 |-----------|----------|--------------|
-| ⚡ Spike-Schwelle | `200 W` | Sprünge größer als dieser Wert werden als Spike behandelt |
+| ⚡ Spike-Schwelle | `300 W` | Sprünge größer als dieser Wert werden als Spike behandelt |
 | ⏱️ Bestätigungszeit | `3 s` | Wartezeit, bevor ein Spike-Wert übernommen wird |
 | 📉 Minimaler Offset | `30 W` | Untere Grenze des Offsets bei ruhigem Netz |
 | 📈 Maximaler Offset | `250 W` | Obere Grenze des Offsets bei sehr unruhigem Netz |
