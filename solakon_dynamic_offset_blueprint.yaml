@@ -4,7 +4,7 @@ blueprint:
     ### Dynamischer Nullpunkt-Offset
     Filtert Netzspitzen und schreibt den berechneten dynamischen Offset
     in die Ziel-Helfer.
-    
+
     **Erforderliche Helfer:**
     - `input_number.solakon_netz_spike_gefiltert`
     - `sensor.solakon_netz_brucke`
@@ -13,85 +13,236 @@ blueprint:
   source_url: https://github.com/D4nte85/Solakon-one-dynamic-offset-blueprint/blob/main/solakon_dynamic_offset_blueprint.yaml
   domain: automation
   input:
-    grid_power_sensor:
-      name: 🔌 Netz-Leistungssensor
-      description: Roher Sensor vom Stromzähler (z.B. Shelly 3EM).
-      selector:
-        entity:
-          domain: sensor
-          device_class: power
-    grid_stable_helper:
-      name: 🗃️ Spike-Filter Puffer
-      default: input_number.solakon_netz_spike_gefiltert
-      selector:
-        entity:
-          domain: input_number
-    stddev_sensor:
-      name: 📊 Statistik-Sensor (StdDev 60s)
-      default: sensor.solakon_grid_stddev_60s
-      selector:
-        entity:
-          domain: sensor
-    offset_zone1_helper:
-      name: 🎯 Ziel-Helper Offset Zone 1
-      default: input_number.solakon_offset_zone1
-      selector:
-        entity:
-          domain: input_number
-    offset_zone2_helper:
-      name: 🎯 Ziel-Helper Offset Zone 2
-      default: input_number.solakon_offset_zone2
-      selector:
-        entity:
-          domain: input_number
-    spike_threshold:
-      name: ⚡ Spike-Schwelle (W)
-      default: 300
-      selector:
-        number:
-          min: 50
-          max: 1000
-          unit_of_measurement: W
-    spike_confirm_time:
-      name: ⏱️ Bestätigungszeit (s)
-      default: 3
-      selector:
-        number:
-          min: 1
-          max: 10
-          unit_of_measurement: s
-    min_offset:
-      name: 📉 Minimaler Offset (W)
-      default: 30
-      selector:
-        number:
-          min: 0
-          max: 200
-          unit_of_measurement: W
-    cap_offset:
-      name: 📈 Maximaler Offset (W)
-      default: 250
-      selector:
-        number:
-          min: 50
-          max: 1000
-          unit_of_measurement: W
-    noise_floor:
-      name: 🔇 Rausch-Schwelle (W)
-      default: 15
-      selector:
-        number:
-          min: 0
-          max: 100
-          unit_of_measurement: W
-    volatility_factor:
-      name: 📊 Volatilitäts-Faktor
-      default: 1.5
-      selector:
-        number:
-          min: 0.5
-          max: 5.0
-          step: 0.1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ABSCHNITT 1 — Sensoren & Helfer (Pflicht)
+    # ══════════════════════════════════════════════════════════════════════════
+    sensoren_und_helfer:
+      name: "🔌 Sensoren & Helfer"
+      description: >
+        Pflichtfelder. Diese Helfer müssen vor der Einrichtung des Blueprints
+        manuell angelegt werden (siehe README). Jeder Helfer hat eine feste
+        Aufgabe im Verarbeitungs-Pipeline.
+      collapsed: false
+      input:
+
+        grid_power_sensor:
+          name: 🔌 Netz-Leistungssensor
+          description: >
+            Der rohe Messwert deines Stromzählers — z.B. `sensor.shelly3em_power`.
+            Dieser Wert wird ungefiltert als Eingang verwendet. Alle weiteren
+            Verarbeitungsschritte bauen auf diesem Sensor auf.
+          selector:
+            entity:
+              domain: sensor
+              device_class: power
+
+        grid_stable_helper:
+          name: 🗃️ Spike-Filter Puffer
+          description: >
+            Ein `input_number`-Helfer der den zuletzt akzeptierten (spike-gefilterten)
+            Netzwert zwischenspeichert. Er dient als Vergleichsbasis um zu erkennen
+            ob ein neuer Messwert ein Spike ist oder eine echte Laständerung.
+            Standard: `input_number.solakon_netz_spike_gefiltert`
+          default: input_number.solakon_netz_spike_gefiltert
+          selector:
+            entity:
+              domain: input_number
+
+        stddev_sensor:
+          name: 📊 Statistik-Sensor (StdDev 60s)
+          description: >
+            Misst die Standardabweichung des spike-gefilterten Netzwerts über
+            die letzten 60 Sekunden. Hohe Standardabweichung = unruhiges Netz =
+            höherer Offset wird berechnet. Muss als Statistik-Helfer auf den
+            Template-Brücken-Sensor zeigen, nicht direkt auf den input_number.
+            Standard: `sensor.solakon_grid_stddev_60s`
+          default: sensor.solakon_grid_stddev_60s
+          selector:
+            entity:
+              domain: sensor
+
+        offset_zone1_helper:
+          name: 🎯 Ziel-Helper Offset Zone 1
+          description: >
+            Der berechnete dynamische Offset wird in diesen Helfer geschrieben.
+            Der Wechselrichter oder eine nachgelagerte Automation liest ihn als
+            Sicherheitspuffer für Zone 1 aus.
+            Standard: `input_number.solakon_offset_zone1`
+          default: input_number.solakon_offset_zone1
+          selector:
+            entity:
+              domain: input_number
+
+        offset_zone2_helper:
+          name: 🎯 Ziel-Helper Offset Zone 2
+          description: >
+            Identisch zu Zone 1 — falls dein System zwei Regelzonen hat
+            (z.B. Morgen- und Abendprofil) bekommt auch Zone 2 denselben
+            dynamisch berechneten Offset.
+            Standard: `input_number.solakon_offset_zone2`
+          default: input_number.solakon_offset_zone2
+          selector:
+            entity:
+              domain: input_number
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ABSCHNITT 2 — Spike-Filter
+    # ══════════════════════════════════════════════════════════════════════════
+    spike_filter:
+      name: "⚡ Spike-Filter"
+      description: >
+        Kontrolliert wie der Blueprint zwischen echten Laständerungen und
+        kurzen Stromspitzen unterscheidet. Ein Spike ist ein kurzer Ausreißer
+        der unter normalen Umständen schnell wieder verschwindet — z.B. der
+        Anlaufstrom eines Kompressors. Echte Laständerungen (Gerät bleibt an)
+        werden nach der Bestätigungszeit trotzdem übernommen.
+      collapsed: true
+      input:
+
+        spike_threshold:
+          name: ⚡ Spike-Schwelle (W)
+          description: >
+            Wenn der neue Messwert um mehr als diesen Betrag vom letzten
+            akzeptierten Wert abweicht, gilt er als Spike-Verdacht und wird
+            erst nach der Bestätigungszeit übernommen.
+
+            **Zu niedrig:** Normale Geräteschwankungen (z.B. OLED-TV) werden
+            unnötig verzögert.
+            **Zu hoch:** Echter Anlaufstrom wird sofort übernommen und
+            verfälscht die Volatilitätsmessung.
+
+            Empfehlung: 300–400 W für typische Haushalte.
+          default: 300
+          selector:
+            number:
+              min: 50
+              max: 1000
+              unit_of_measurement: W
+
+        spike_confirm_time:
+          name: ⏱️ Bestätigungszeit (s)
+          description: >
+            Wie lange ein Spike-Verdacht stabil bleiben muss bevor er als
+            echte Laständerung akzeptiert wird. Kommt in dieser Zeit ein neuer
+            Wert (mode: restart), beginnt die Wartezeit von vorne — der
+            ursprüngliche Spike-Wert wird verworfen.
+
+            Anlaufströme dauern typisch < 1s, daher reichen 3s als Puffer.
+            Höhere Werte machen den Filter träger bei echten Laständerungen.
+
+            Empfehlung: 3 s.
+          default: 3
+          selector:
+            number:
+              min: 1
+              max: 10
+              unit_of_measurement: s
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ABSCHNITT 3 — Offset-Grenzen
+    # ══════════════════════════════════════════════════════════════════════════
+    offset_grenzen:
+      name: "📏 Offset-Grenzen"
+      description: >
+        Definiert den erlaubten Wertebereich des berechneten Offsets.
+        Der Offset bewegt sich immer innerhalb dieser Grenzen — unabhängig
+        davon wie unruhig das Netz ist. So bleibt das System planbar und
+        verhindert übermäßige Einspeisung oder zu knappe Puffer.
+      collapsed: true
+      input:
+
+        min_offset:
+          name: 📉 Minimaler Offset (W)
+          description: >
+            Untere Grenze des Offsets — aktiv wenn das Netz völlig ruhig ist
+            (StdDev unter der Rausch-Schwelle). Sollte mindestens die
+            Messungenauigkeit deines Zählers abdecken.
+
+            Shelly 3EM hat ~5–10 W Messrauschen, daher sind 30–50 W sinnvoll.
+            Zu niedrig: Wechselrichter speist bei ruhigem Netz zu knapp ein.
+
+            Empfehlung: 30–50 W.
+          default: 30
+          selector:
+            number:
+              min: 0
+              max: 200
+              unit_of_measurement: W
+
+        cap_offset:
+          name: 📈 Maximaler Offset (W)
+          description: >
+            Obere Grenze des Offsets — wird bei sehr unruhigem Netz nicht
+            überschritten. Schützt davor dass bei extremen Schwankungen
+            zu viel Leistung "verschenkt" wird.
+
+            250 W ist ein guter Kompromiss zwischen Schutz und Effizienz.
+            Wer minimale Einspeisung priorisiert kann auf 400–500 W erhöhen.
+
+            Empfehlung: 250 W.
+          default: 250
+          selector:
+            number:
+              min: 50
+              max: 1000
+              unit_of_measurement: W
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ABSCHNITT 4 — Volatilitäts-Regler
+    # ══════════════════════════════════════════════════════════════════════════
+    volatilitaet:
+      name: "📊 Volatilitäts-Regler"
+      description: >
+        Steuert wie empfindlich der Offset auf Netzschwankungen reagiert.
+        Die Formel lautet:
+
+        `offset = min_offset + max(0, (StdDev − noise_floor) × faktor)`
+
+        Rausch-Schwelle und Faktor bestimmen gemeinsam ab wann und wie stark
+        der Offset auf Unruhe im Netz reagiert.
+      collapsed: true
+      input:
+
+        noise_floor:
+          name: 🔇 Rausch-Schwelle (W)
+          description: >
+            StdDev-Werte unterhalb dieser Schwelle gelten als unvermeidliches
+            Grundrauschen des Messsystems und lösen keine Offset-Erhöhung aus.
+            Erst oberhalb dieser Schwelle beginnt der Volatilitäts-Faktor zu wirken.
+
+            Zu niedrig: Messrauschen des Zählers erhöht dauerhaft den Offset.
+            Zu hoch: Echte leichte Schwankungen werden ignoriert.
+
+            Empfehlung: 15 W (passend zur Shelly 3EM Genauigkeit).
+          default: 15
+          selector:
+            number:
+              min: 0
+              max: 100
+              unit_of_measurement: W
+
+        volatility_factor:
+          name: 📊 Volatilitäts-Faktor
+          description: >
+            Verstärkung der Netz-Volatilität auf den Offset. Je höher der Wert,
+            desto stärker reagiert der Offset auf Schwankungen.
+
+            Beispiele bei StdDev = 80 W, noise_floor = 15 W:
+            - Faktor 0.5 → +33 W über Minimum
+            - Faktor 1.5 → +98 W über Minimum  ← Standard
+            - Faktor 3.0 → +195 W über Minimum
+
+            Wer minimale Einspeisung priorisiert → Faktor erhöhen.
+            Wer Effizienz priorisiert → Faktor senken.
+
+            Empfehlung: 1.5.
+          default: 1.5
+          selector:
+            number:
+              min: 0.5
+              max: 5.0
+              step: 0.1
 
 # Neustart bricht laufendes Spike-Bestätigungs-Delay ab, wenn neuer Wert kommt
 mode: restart
@@ -118,7 +269,7 @@ action:
       - condition: template
         value_template: >
           {{ (states(grid_power_sensor) | float(0) - states(grid_stable_helper) | float(0)) | abs
-             > spike_threshold | float(200) }}
+             > spike_threshold | float(300) }}
     then:
       # Sprung zu groß → warten ob Wert stabil bleibt (Spike-Bestätigung)
       - delay:
