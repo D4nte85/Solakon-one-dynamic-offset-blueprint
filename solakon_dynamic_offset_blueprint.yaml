@@ -63,29 +63,27 @@ blueprint:
               domain: sensor
 
         offset_zone1_helper:
-          name: 🎯 Ziel-Helper Offset Zone 1
+          name: 🎯 Ziel-Helper Offset Zone 1 (Optional)
           description: >
-            Der berechnete dynamische Offset wird in diesen Helfer geschrieben.
-            Der Wechselrichter oder eine nachgelagerte Automation liest ihn als
-            Sicherheitspuffer für Zone 1 aus.
+            Offset-Ausgabe für Zone 1. Mindestens einer der beiden Ziel-Helper
+            muss konfiguriert sein.
             Standard: `input_number.solakon_offset_zone1`
-          default: input_number.solakon_offset_zone1
+          default: {}
           selector:
             entity:
               domain: input_number
 
         offset_zone2_helper:
-          name: 🎯 Ziel-Helper Offset Zone 2
+          name: 🎯 Ziel-Helper Offset Zone 2 (Optional)
           description: >
-            Identisch zu Zone 1 — falls dein System zwei Regelzonen hat
-            (z.B. Morgen- und Abendprofil) bekommt auch Zone 2 denselben
-            dynamisch berechneten Offset.
+            Offset-Ausgabe für Zone 2. Mindestens einer der beiden Ziel-Helper
+            muss konfiguriert sein.
             Standard: `input_number.solakon_offset_zone2`
-          default: input_number.solakon_offset_zone2
+          default: {}
           selector:
             entity:
               domain: input_number
-
+              
     # ══════════════════════════════════════════════════════════════════════════
     # ABSCHNITT 2 — Spike-Filter
     # ══════════════════════════════════════════════════════════════════════════
@@ -258,12 +256,21 @@ variables:
   cap_offset: !input cap_offset
   noise_floor: !input noise_floor
   volatility_factor: !input volatility_factor
+  offset_zone1_entity: !input offset_zone1_helper
+  offset_zone2_entity: !input offset_zone2_helper
+  offset_zone1_valid: >
+    {{ offset_zone1_entity is string and offset_zone1_entity | length > 0 }}
+  offset_zone2_valid: >
+    {{ offset_zone2_entity is string and offset_zone2_entity | length > 0 }}
 
 trigger:
   - platform: state
     entity_id: !input grid_power_sensor
 
 action:
+  - condition: template
+    value_template: "{{ offset_zone1_valid or offset_zone2_valid }}"
+    # Wenn false: Automation stoppt still (mode: restart, kein Fehler-Spam nötig)
   # ── Schritt 1: Spike-Filterung ─────────────────────────────────────────────
   - if:
       - condition: template
@@ -299,14 +306,24 @@ action:
           {{ [[min_offset | int(30), result] | max, cap_offset | int(250)] | min }}
         {% endif %}
 
-  # ── Schritt 3: Offset in beide Zonen schreiben ─────────────────────────────
-  - action: input_number.set_value
-    target:
-      entity_id: !input offset_zone1_helper
-    data:
-      value: "{{ dynamic_offset }}"
-  - action: input_number.set_value
-    target:
-      entity_id: !input offset_zone2_helper
-    data:
-      value: "{{ dynamic_offset }}"
+# ── Schritt 3: Offset in konfigurierte Zonen schreiben ─────────────────────
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ offset_zone1_valid }}"
+        sequence:
+          - action: input_number.set_value
+            target:
+              entity_id: "{{ offset_zone1_entity }}"
+            data:
+              value: "{{ dynamic_offset }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ offset_zone2_valid }}"
+        sequence:
+          - action: input_number.set_value
+            target:
+              entity_id: "{{ offset_zone2_entity }}"
+            data:
+              value: "{{ dynamic_offset }}"
