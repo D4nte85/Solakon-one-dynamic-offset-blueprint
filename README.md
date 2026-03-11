@@ -6,29 +6,21 @@
 
 [![Blueprint importieren](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https://raw.githubusercontent.com/D4nte85/Solakon-one-dynamic-offset-blueprint/main/solakon_dynamic_offset_blueprint.yaml)
 
-
 ---
 
 ## Grundprinzip
 
 Der Blueprint verschiebt das Regelziel des PI-Reglers nach oben:
+
 ```
 Regelziel = 0 W + Offset
 ```
 
-Ohne Offset würde der Regler auf 0 W einregeln. Bei fluktuierenden Geräten
-(Kompressor, Waschmaschine) führt das zu ständigem Ein-/Ausspeisen: Gerät aus
-→ Netz rutscht ins Negative → Einspeisung → Gerät an → zurückregeln → Endlosschleife.
+Ohne Offset würde der Regler auf 0 W einregeln. Bei fluktuierenden Geräten (Kompressor, Waschmaschine) führt das zu ständigem Ein-/Ausspeisen: Gerät aus → Netz rutscht ins Negative → Einspeisung → Gerät an → zurückregeln → Endlosschleife.
 
-Der dynamische Offset hält einen **Netzbezugspuffer**, der groß genug ist um
-typische Schwankungen aufzufangen. Die Standardabweichung der letzten 60 Sekunden
-dient dabei als Schätzung der nötigen Puffergröße — je unruhiger das Netz, desto
-größer der Offset.
+Der dynamische Offset hält einen **Netzbezugspuffer**, der groß genug ist um typische Schwankungen aufzufangen. Die Standardabweichung der letzten 60 Sekunden dient dabei als Schätzung der nötigen Puffergröße — je unruhiger das Netz, desto größer der Offset.
 
-Da die gesamte Reaktionskette (Shelly ~1s → HA → Modbus → Inverter → MPPT-Ramping)
-mehrere Sekunden beträgt, ist ein reaktiver Ansatz ohnehin nicht sinnvoll möglich.
-Der StdDev-Ansatz passt sich stattdessen aus der Vergangenheit an — nach dem ersten
-Takt-Zyklus eines Geräts ist der Offset bereits kalibriert.
+Da die gesamte Reaktionskette (Shelly ~1s → HA → Modbus → Inverter → MPPT-Ramping) mehrere Sekunden beträgt, ist ein reaktiver Ansatz ohnehin nicht sinnvoll möglich. Der StdDev-Ansatz passt sich stattdessen aus der Vergangenheit an — nach dem ersten Takt-Zyklus eines Geräts ist der Offset bereits kalibriert.
 
 ```
 Stromzähler (roh)
@@ -66,18 +58,17 @@ Stromzähler (roh)
 
 ## Benötigte Helfer
 
-Der Blueprint benötigt **5 externe Helfer**. Die ersten drei sind Pflicht; mindestens einer der beiden Ziel-Helper (4 oder 5) muss konfiguriert sein.
+Der Blueprint benötigt **4 externe Helfer**.
 
 | # | Typ | ID | Zweck |
 |---|-----|----|-------|
 | 1 | `input_number` | `solakon_netz_spike_gefiltert` | Spike-gefilterter Zwischenwert |
 | 2 | Template-Sensor | `solakon_netz_brucke` | Brücke für Statistik-Sensor |
 | 3 | Statistik-Sensor | `solakon_grid_stddev_60s` | Standardabweichung über 60 s |
-| 4 | `input_number` | `solakon_offset_zone1` | Offset-Ausgabe für Zone 1 *(optional)* |
-| 5 | `input_number` | `solakon_offset_zone2` | Offset-Ausgabe für Zone 2 *(optional)* |
+| 4 | `input_number` | `solakon_offset_zone1` | Offset-Ausgabe für Zone 1 |
+| 5 | `input_number` | `solakon_offset_zone2` | Offset-Ausgabe für Zone 2 |
 
 > **Reihenfolge einhalten!** Jeder Helfer hängt vom vorherigen ab.
-> **Mindestens einer** der Ziel-Helper (4 oder 5) muss konfiguriert sein — sonst stoppt die Automation still.
 
 ---
 
@@ -133,11 +124,9 @@ Der Blueprint benötigt **5 externe Helfer**. Die ersten drei sind Pflicht; mind
 
 ---
 
-### Schritt 4 — Ziel-Helfer für Offset-Ausgabe *(Optional)*
+### Schritt 4 — Ziel-Helfer für Offset-Ausgabe
 
-*Helfer → **Zahl erstellen** — je nach Bedarf für Zone 1 und/oder Zone 2*
-
-> ℹ️ Mindestens einer dieser Helper muss erstellt und im Blueprint konfiguriert sein. Wer nur Zone 1 oder nur Zone 2 dynamisch steuern möchte, kann den jeweils anderen weglassen.
+*Helfer → **Zahl erstellen** — je einmal für Zone 1 und Zone 2*
 
 | Feld | Zone 1 | Zone 2 |
 |------|--------|--------|
@@ -151,12 +140,11 @@ Der Blueprint benötigt **5 externe Helfer**. Die ersten drei sind Pflicht; mind
 
 ### Schritt 5 — Blueprint importieren & Automation anlegen
 
-1. Blueprint über den Import-Button oben importieren
+1. Blueprint-Datei nach `config/blueprints/automation/solakon/` kopieren
 2. *Einstellungen → Automationen → **Blueprint-Automation erstellen***
 3. Blueprint `Solakon ONE — Dynamischer Offset` wählen
-4. Pflichtfelder belegen: Netz-Sensor, Spike-Filter Puffer, Statistik-Sensor
-5. Mindestens einen der Ziel-Helper (Zone 1 / Zone 2) konfigurieren
-6. Optionale Parameter nach Bedarf anpassen (s. u.)
+4. Pflichtfelder belegen (Netz-Sensor, alle Helfer)
+5. Optionale Parameter nach Bedarf anpassen (s. u.)
 
 ---
 
@@ -169,15 +157,7 @@ Der Blueprint benötigt **5 externe Helfer**. Die ersten drei sind Pflicht; mind
 | 🔌 Netz-Leistungssensor | Roher Sensor vom Stromzähler (z.B. `sensor.shelly3em_power`) |
 | 🗃️ Spike-Filter Puffer | `input_number.solakon_netz_spike_gefiltert` |
 | 📊 Statistik-Sensor | `sensor.solakon_grid_stddev_60s` |
-
-### Optionale Felder
-
-| Parameter | Standard | Beschreibung |
-|-----------|----------|--------------|
-| 🎯 Ziel-Helper Zone 1 | *(leer)* | `input_number.solakon_offset_zone1` — Offset-Ausgabe für Zone 1 |
-| 🎯 Ziel-Helper Zone 2 | *(leer)* | `input_number.solakon_offset_zone2` — Offset-Ausgabe für Zone 2 |
-
-> ⚠️ Mindestens einer der beiden Ziel-Helper muss konfiguriert sein, sonst stoppt die Automation still ohne Fehler.
+| 🎯 Ziel-Helper Zone 1/2 | `input_number.solakon_offset_zone1/2` |
 
 ### Optionale Parameter (mit Standardwerten)
 
@@ -185,23 +165,10 @@ Der Blueprint benötigt **5 externe Helfer**. Die ersten drei sind Pflicht; mind
 |-----------|----------|--------------|
 | ⚡ Spike-Schwelle | `300 W` | Sprünge größer als dieser Wert werden als Spike behandelt |
 | ⏱️ Bestätigungszeit | `3 s` | Wartezeit, bevor ein Spike-Wert übernommen wird |
-| 📉 Minimaler Offset | `30 W` | Untere Grenze des Offsets bei ruhigem Netz |
-| 📈 Maximaler Offset | `250 W` | Obere Grenze des Offsets bei sehr unruhigem Netz |
+| 📉 Minimaler Offset | `30 W` | Grundpuffer bei ruhigem Netz — deckt Messungenauigkeit und kleine Alltagsschwankungen ab |
+| 📈 Maximaler Offset | `250 W` | Obere Grenze bei sehr unruhigem Netz |
 | 🔇 Rausch-Schwelle | `15 W` | StdDev unterhalb dieser Grenze gilt als Grundrauschen |
-| 📊 Volatilitäts-Faktor | `1.5` | Verstärkung der Volatilität auf den Offset |
-
-### Volatilitäts-Faktor — Empfehlung
-
-Da `min_offset` bereits einen Grundpuffer bereitstellt, skaliert der Faktor nur
-den **Anteil oberhalb der noise_floor**. Faustregeln:
-
-| Faktor | Verhalten |
-|--------|-----------|
-| `1.0` | Kompromiss — min_offset trägt den Hauptanteil |
-| `1.5` | Standard — etwas konservativer Puffer on top |
-| `2.0+` | Nur bei sehr aggressiv taktenden Geräten sinnvoll |
-
-Werte über 2.0 erhöhen den Dauerbezug spürbar ohne nennenswerten Zusatznutzen.
+| 📊 Volatilitäts-Faktor | `1.5` | Verstärkung der Volatilität auf den Offset (wirkt nur oberhalb der Rausch-Schwelle) |
 
 ### Offset-Formel
 
@@ -210,10 +177,22 @@ volatility_buffer = max(0, (StdDev - noise_floor) × factor)
 offset            = clamp(min_offset + volatility_buffer, min_offset, cap_offset)
 ```
 
-**Beispiele bei verschiedenen Netzsituationen:**
+`min_offset` deckt bereits ruhige Netzsituationen ab. Der Faktor skaliert nur den **Anteil oberhalb der noise_floor** — also echte, vorgefiltierterte Volatilität.
+
+### Volatilitäts-Faktor — Empfehlung
+
+| Faktor | Verhalten |
+|--------|-----------|
+| `1.0` | Kompromiss — min_offset trägt den Hauptanteil |
+| `1.5` | Standard — moderater Puffer on top |
+| `2.0+` | Nur bei sehr aggressiv taktenden Geräten sinnvoll |
+
+Werte über 2.0 erhöhen den Dauerbezug spürbar ohne nennenswerten Zusatznutzen.
+
+**Beispiele bei verschiedenen Netzsituationen** (min_offset=30, noise_floor=15, factor=1.5):
 
 | Netz-Zustand | StdDev | Berechneter Offset |
-|-------------|--------|--------------------|
+|:------------|:------:|:------------------:|
 | Sehr ruhig | 5 W | 30 W *(Minimum)* |
 | Normal | 30 W | 53 W |
 | Unruhig | 80 W | 128 W |
@@ -235,6 +214,3 @@ offset            = clamp(min_offset + volatility_buffer, min_offset, cap_offset
 
 **`input_number` akzeptiert keinen Wert vom Blueprint**
 → Sicherstellen, dass Min/Max-Bereich den Offset-Werten entspricht (0–500 W empfohlen).
-
-**Automation läuft, aber Ziel-Helper wird nicht aktualisiert**
-→ Prüfen ob der Ziel-Helper im Blueprint-Feld konfiguriert ist (nicht leer gelassen). Mindestens einer der beiden muss gesetzt sein.
