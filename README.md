@@ -47,17 +47,18 @@ Stromzähler (roh)
 
 ## Benötigte Helfer
 
-Der Blueprint benötigt **4 externe Helfer**.
+Der Blueprint benötigt **5 externe Helfer**. Die ersten drei sind Pflicht; mindestens einer der beiden Ziel-Helper (4 oder 5) muss konfiguriert sein.
 
 | # | Typ | ID | Zweck |
 |---|-----|----|-------|
 | 1 | `input_number` | `solakon_netz_spike_gefiltert` | Spike-gefilterter Zwischenwert |
 | 2 | Template-Sensor | `solakon_netz_brucke` | Brücke für Statistik-Sensor |
 | 3 | Statistik-Sensor | `solakon_grid_stddev_60s` | Standardabweichung über 60 s |
-| 4 | `input_number` | `solakon_offset_zone1` | Offset-Ausgabe für Zone 1 |
-| 5 | `input_number` | `solakon_offset_zone2` | Offset-Ausgabe für Zone 2 |
+| 4 | `input_number` | `solakon_offset_zone1` | Offset-Ausgabe für Zone 1 *(optional)* |
+| 5 | `input_number` | `solakon_offset_zone2` | Offset-Ausgabe für Zone 2 *(optional)* |
 
 > **Reihenfolge einhalten!** Jeder Helfer hängt vom vorherigen ab.
+> **Mindestens einer** der Ziel-Helper (4 oder 5) muss konfiguriert sein — sonst stoppt die Automation still.
 
 ---
 
@@ -113,9 +114,11 @@ Der Blueprint benötigt **4 externe Helfer**.
 
 ---
 
-### Schritt 4 — Ziel-Helfer für Offset-Ausgabe
+### Schritt 4 — Ziel-Helfer für Offset-Ausgabe *(Optional)*
 
-*Helfer → **Zahl erstellen** — je einmal für Zone 1 und Zone 2*
+*Helfer → **Zahl erstellen** — je nach Bedarf für Zone 1 und/oder Zone 2*
+
+> ℹ️ Mindestens einer dieser Helper muss erstellt und im Blueprint konfiguriert sein. Wer nur Zone 1 oder nur Zone 2 dynamisch steuern möchte, kann den jeweils anderen weglassen.
 
 | Feld | Zone 1 | Zone 2 |
 |------|--------|--------|
@@ -129,11 +132,12 @@ Der Blueprint benötigt **4 externe Helfer**.
 
 ### Schritt 5 — Blueprint importieren & Automation anlegen
 
-1. Blueprint-Datei nach `config/blueprints/automation/solakon/` kopieren
+1. Blueprint über den Import-Button oben importieren
 2. *Einstellungen → Automationen → **Blueprint-Automation erstellen***
 3. Blueprint `Solakon ONE — Dynamischer Offset` wählen
-4. Pflichtfelder belegen (Netz-Sensor, alle Helfer)
-5. Optionale Parameter nach Bedarf anpassen (s. u.)
+4. Pflichtfelder belegen: Netz-Sensor, Spike-Filter Puffer, Statistik-Sensor
+5. Mindestens einen der Ziel-Helper (Zone 1 / Zone 2) konfigurieren
+6. Optionale Parameter nach Bedarf anpassen (s. u.)
 
 ---
 
@@ -146,7 +150,15 @@ Der Blueprint benötigt **4 externe Helfer**.
 | 🔌 Netz-Leistungssensor | Roher Sensor vom Stromzähler (z.B. `sensor.shelly3em_power`) |
 | 🗃️ Spike-Filter Puffer | `input_number.solakon_netz_spike_gefiltert` |
 | 📊 Statistik-Sensor | `sensor.solakon_grid_stddev_60s` |
-| 🎯 Ziel-Helper Zone 1/2 | `input_number.solakon_offset_zone1/2` |
+
+### Optionale Felder
+
+| Parameter | Standard | Beschreibung |
+|-----------|----------|--------------|
+| 🎯 Ziel-Helper Zone 1 | *(leer)* | `input_number.solakon_offset_zone1` — Offset-Ausgabe für Zone 1 |
+| 🎯 Ziel-Helper Zone 2 | *(leer)* | `input_number.solakon_offset_zone2` — Offset-Ausgabe für Zone 2 |
+
+> ⚠️ Mindestens einer der beiden Ziel-Helper muss konfiguriert sein, sonst stoppt die Automation still ohne Fehler.
 
 ### Optionale Parameter (mit Standardwerten)
 
@@ -191,3 +203,6 @@ offset            = clamp(min_offset + volatility_buffer, min_offset, cap_offset
 
 **`input_number` akzeptiert keinen Wert vom Blueprint**
 → Sicherstellen, dass Min/Max-Bereich den Offset-Werten entspricht (0–500 W empfohlen).
+
+**Automation läuft, aber Ziel-Helper wird nicht aktualisiert**
+→ Prüfen ob der Ziel-Helper im Blueprint-Feld konfiguriert ist (nicht leer gelassen). Mindestens einer der beiden muss gesetzt sein.
