@@ -9,7 +9,26 @@
 
 ---
 
-## Übersicht: Wie es funktioniert
+## Grundprinzip
+
+Der Blueprint verschiebt das Regelziel des PI-Reglers nach oben:
+```
+Regelziel = 0 W + Offset
+```
+
+Ohne Offset würde der Regler auf 0 W einregeln. Bei fluktuierenden Geräten
+(Kompressor, Waschmaschine) führt das zu ständigem Ein-/Ausspeisen: Gerät aus
+→ Netz rutscht ins Negative → Einspeisung → Gerät an → zurückregeln → Endlosschleife.
+
+Der dynamische Offset hält einen **Netzbezugspuffer**, der groß genug ist um
+typische Schwankungen aufzufangen. Die Standardabweichung der letzten 60 Sekunden
+dient dabei als Schätzung der nötigen Puffergröße — je unruhiger das Netz, desto
+größer der Offset.
+
+Da die gesamte Reaktionskette (Shelly ~1s → HA → Modbus → Inverter → MPPT-Ramping)
+mehrere Sekunden beträgt, ist ein reaktiver Ansatz ohnehin nicht sinnvoll möglich.
+Der StdDev-Ansatz passt sich stattdessen aus der Vergangenheit an — nach dem ersten
+Takt-Zyklus eines Geräts ist der Offset bereits kalibriert.
 
 ```
 Stromzähler (roh)
@@ -170,6 +189,19 @@ Der Blueprint benötigt **5 externe Helfer**. Die ersten drei sind Pflicht; mind
 | 📈 Maximaler Offset | `250 W` | Obere Grenze des Offsets bei sehr unruhigem Netz |
 | 🔇 Rausch-Schwelle | `15 W` | StdDev unterhalb dieser Grenze gilt als Grundrauschen |
 | 📊 Volatilitäts-Faktor | `1.5` | Verstärkung der Volatilität auf den Offset |
+
+### Volatilitäts-Faktor — Empfehlung
+
+Da `min_offset` bereits einen Grundpuffer bereitstellt, skaliert der Faktor nur
+den **Anteil oberhalb der noise_floor**. Faustregeln:
+
+| Faktor | Verhalten |
+|--------|-----------|
+| `1.0` | Kompromiss — min_offset trägt den Hauptanteil |
+| `1.5` | Standard — etwas konservativer Puffer on top |
+| `2.0+` | Nur bei sehr aggressiv taktenden Geräten sinnvoll |
+
+Werte über 2.0 erhöhen den Dauerbezug spürbar ohne nennenswerten Zusatznutzen.
 
 ### Offset-Formel
 
