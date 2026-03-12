@@ -1,11 +1,11 @@
 blueprint:
   name: Solakon ONE — Dynamischer Offset (Spike-Filter + Volatilitäts-Regler)
   description: |
-    ### Dynamischer Nullpunkt-Offset
-    Filtert Netzspitzen und schreibt den berechneten dynamischen Offset
-    in die Ziel-Helfer.
+    ### Dynamischer Nullpunkt-Offset / Dynamic Zero-Point Offset
+    Filtert Netzspitzen und schreibt den berechneten Offset in die Ziel-Helfer.
+    Filters grid spikes and writes the calculated offset to the target helpers.
 
-    **Erforderliche Helfer:**
+    **Erforderliche Helfer / Required helpers:**
     - `input_number.solakon_netz_spike_gefiltert`
     - `sensor.solakon_netz_brucke`
     - `sensor.solakon_grid_stddev_60s`
@@ -15,35 +15,32 @@ blueprint:
   input:
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ABSCHNITT 1 — Sensoren & Helfer (Pflicht)
+    # ABSCHNITT 1 / SECTION 1 — Sensoren & Helfer (Pflicht / Required)
     # ══════════════════════════════════════════════════════════════════════════
     sensoren_und_helfer:
-      name: "🔌 Sensoren & Helfer"
+      name: "🔌 Sensoren & Helfer / Sensors & Helpers"
       description: >
-        Pflichtfelder. Diese Helfer müssen vor der Einrichtung des Blueprints
-        manuell angelegt werden (siehe README). Jeder Helfer hat eine feste
-        Aufgabe im Verarbeitungs-Pipeline.
+        Pflichtfelder — müssen vor der Blueprint-Einrichtung manuell angelegt werden (siehe README).
+        Required fields — must be created manually before setting up the blueprint (see README).
       collapsed: false
       input:
 
         grid_power_sensor:
-          name: 🔌 Netz-Leistungssensor
+          name: 🔌 Netz-Leistungssensor / Grid Power Sensor
           description: >
-            Der rohe Messwert deines Stromzählers — z.B. `sensor.shelly3em_power`.
-            Dieser Wert wird ungefiltert als Eingang verwendet. Alle weiteren
-            Verarbeitungsschritte bauen auf diesem Sensor auf.
+            Roher Messwert des Stromzählers — z.B. `sensor.shelly3em_power`.
+            Raw meter reading — e.g. `sensor.shelly3em_power`.
           selector:
             entity:
               domain: sensor
               device_class: power
 
         grid_stable_helper:
-          name: 🗃️ Spike-Filter Puffer
+          name: 🗃️ Spike-Filter Puffer / Spike-Filter Buffer
           description: >
-            Ein `input_number`-Helfer der den zuletzt akzeptierten (spike-gefilterten)
-            Netzwert zwischenspeichert. Er dient als Vergleichsbasis um zu erkennen
-            ob ein neuer Messwert ein Spike ist oder eine echte Laständerung.
-            Standard: `input_number.solakon_netz_spike_gefiltert`
+            `input_number` der den letzten akzeptierten (spike-gefilterten) Netzwert speichert.
+            `input_number` storing the last accepted (spike-filtered) grid value.
+            Standard / Default: `input_number.solakon_netz_spike_gefiltert`
           default: input_number.solakon_netz_spike_gefiltert
           selector:
             entity:
@@ -52,65 +49,57 @@ blueprint:
         stddev_sensor:
           name: 📊 Statistik-Sensor (StdDev 60s)
           description: >
-            Misst die Standardabweichung des spike-gefilterten Netzwerts über
-            die letzten 60 Sekunden. Hohe Standardabweichung = unruhiges Netz =
-            höherer Offset wird berechnet. Muss als Statistik-Helfer auf den
-            Template-Brücken-Sensor zeigen, nicht direkt auf den input_number.
-            Standard: `sensor.solakon_grid_stddev_60s`
+            Misst die Standardabweichung des spike-gefilterten Netzwerts der letzten 60 s.
+            Measures the standard deviation of the spike-filtered grid value over 60 s.
+            Standard / Default: `sensor.solakon_grid_stddev_60s`
           default: sensor.solakon_grid_stddev_60s
           selector:
             entity:
               domain: sensor
 
         offset_zone1_helper:
-          name: 🎯 Ziel-Helper Offset Zone 1 (Optional)
+          name: 🎯 Ziel-Helper Zone 1 (Optional)
           description: >
-            Offset-Ausgabe für Zone 1. Mindestens einer der beiden Ziel-Helper
-            muss konfiguriert sein.
-            Standard: `input_number.solakon_offset_zone1`
+            Offset-Ausgabe für Zone 1. Mindestens einer der beiden Helfer muss konfiguriert sein.
+            Offset output for Zone 1. At least one of the two helpers must be configured.
+            Standard / Default: `input_number.solakon_offset_zone1`
           default: {}
           selector:
             entity:
               domain: input_number
 
         offset_zone2_helper:
-          name: 🎯 Ziel-Helper Offset Zone 2 (Optional)
+          name: 🎯 Ziel-Helper Zone 2 (Optional)
           description: >
-            Offset-Ausgabe für Zone 2. Mindestens einer der beiden Ziel-Helper
-            muss konfiguriert sein.
-            Standard: `input_number.solakon_offset_zone2`
+            Offset-Ausgabe für Zone 2. Mindestens einer der beiden Helfer muss konfiguriert sein.
+            Offset output for Zone 2. At least one of the two helpers must be configured.
+            Standard / Default: `input_number.solakon_offset_zone2`
           default: {}
           selector:
             entity:
               domain: input_number
-              
+
     # ══════════════════════════════════════════════════════════════════════════
-    # ABSCHNITT 2 — Spike-Filter
+    # ABSCHNITT 2 / SECTION 2 — Spike-Filter
     # ══════════════════════════════════════════════════════════════════════════
     spike_filter:
       name: "⚡ Spike-Filter"
       description: >
-        Kontrolliert wie der Blueprint zwischen echten Laständerungen und
-        kurzen Stromspitzen unterscheidet. Ein Spike ist ein kurzer Ausreißer
-        der unter normalen Umständen schnell wieder verschwindet — z.B. der
-        Anlaufstrom eines Kompressors. Echte Laständerungen (Gerät bleibt an)
-        werden nach der Bestätigungszeit trotzdem übernommen.
+        Unterscheidet echte Laständerungen von kurzen Stromspitzen (z.B. Kompressor-Anlaufstrom).
+        Echte Änderungen werden nach der Bestätigungszeit übernommen.
+        Distinguishes real load changes from short spikes (e.g. compressor inrush).
+        Real changes are accepted after the confirmation delay.
       collapsed: true
       input:
 
         spike_threshold:
-          name: ⚡ Spike-Schwelle (W)
+          name: ⚡ Spike-Schwelle / Spike Threshold (W)
           description: >
-            Wenn der neue Messwert um mehr als diesen Betrag vom letzten
-            akzeptierten Wert abweicht, gilt er als Spike-Verdacht und wird
-            erst nach der Bestätigungszeit übernommen.
-
-            **Zu niedrig:** Normale Geräteschwankungen (z.B. OLED-TV) werden
-            unnötig verzögert.
-            **Zu hoch:** Echter Anlaufstrom wird sofort übernommen und
-            verfälscht die Volatilitätsmessung.
-
-            Empfehlung: 300–400 W für typische Haushalte.
+            Abweichung vom letzten Wert, ab der ein Spike-Verdacht ausgelöst wird.
+            Deviation from the last value that triggers spike detection.
+            Zu niedrig / Too low: verzögert normale Schwankungen.
+            Zu hoch / Too high: Anlaufstrom verfälscht die Volatilitätsmessung.
+            Empfehlung / Recommended: 300–400 W.
           default: 300
           selector:
             number:
@@ -119,17 +108,13 @@ blueprint:
               unit_of_measurement: W
 
         spike_confirm_time:
-          name: ⏱️ Bestätigungszeit (s)
+          name: ⏱️ Bestätigungszeit / Confirmation Time (s)
           description: >
-            Wie lange ein Spike-Verdacht stabil bleiben muss bevor er als
-            echte Laständerung akzeptiert wird. Kommt in dieser Zeit ein neuer
-            Wert (mode: restart), beginnt die Wartezeit von vorne — der
-            ursprüngliche Spike-Wert wird verworfen.
-
-            Anlaufströme dauern typisch < 1s, daher reichen 3s als Puffer.
-            Höhere Werte machen den Filter träger bei echten Laständerungen.
-
-            Empfehlung: 3 s.
+            Wartezeit bis ein Spike-Verdacht als echte Laständerung gilt.
+            Ein neuer Wert in dieser Zeit (mode: restart) verwirft den Spike.
+            Wait time until a spike candidate is accepted as a real load change.
+            A new value during this time (mode: restart) discards the spike.
+            Empfehlung / Recommended: 3 s.
           default: 3
           selector:
             number:
@@ -138,29 +123,22 @@ blueprint:
               unit_of_measurement: s
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ABSCHNITT 3 — Offset-Grenzen
+    # ABSCHNITT 3 / SECTION 3 — Offset-Grenzen / Offset Limits
     # ══════════════════════════════════════════════════════════════════════════
     offset_grenzen:
-      name: "📏 Offset-Grenzen"
+      name: "📏 Offset-Grenzen / Offset Limits"
       description: >
-        Definiert den erlaubten Wertebereich des berechneten Offsets.
-        Der Offset bewegt sich immer innerhalb dieser Grenzen — unabhängig
-        davon wie unruhig das Netz ist. So bleibt das System planbar und
-        verhindert übermäßige Einspeisung oder zu knappe Puffer.
+        Definiert den erlaubten Wertebereich des Offsets — unabhängig von der Netzunruhe.
+        Defines the allowed offset range — regardless of grid volatility.
       collapsed: true
       input:
 
         min_offset:
-          name: 📉 Minimaler Offset (W)
+          name: 📉 Minimaler Offset / Minimum Offset (W)
           description: >
-            Untere Grenze des Offsets — aktiv wenn das Netz völlig ruhig ist
-            (StdDev unter der Rausch-Schwelle). Sollte mindestens die
-            Messungenauigkeit deines Zählers abdecken.
-
-            Shelly 3EM hat ~5–10 W Messrauschen, daher sind 30–50 W sinnvoll.
-            Zu niedrig: Wechselrichter speist bei ruhigem Netz zu knapp ein.
-
-            Empfehlung: 30–50 W.
+            Aktiv bei ruhigem Netz (StdDev unter Rausch-Schwelle). Sollte die Messungenauigkeit abdecken.
+            Active when grid is calm (StdDev below noise floor). Should cover measurement inaccuracy.
+            Shelly 3EM: ~5–10 W Rauschen / noise → 30–50 W sinnvoll / recommended.
           default: 30
           selector:
             number:
@@ -169,16 +147,11 @@ blueprint:
               unit_of_measurement: W
 
         cap_offset:
-          name: 📈 Maximaler Offset (W)
+          name: 📈 Maximaler Offset / Maximum Offset (W)
           description: >
-            Obere Grenze des Offsets — wird bei sehr unruhigem Netz nicht
-            überschritten. Schützt davor dass bei extremen Schwankungen
-            zu viel Leistung "verschenkt" wird.
-
-            250 W ist ein guter Kompromiss zwischen Schutz und Effizienz.
-            Wer minimale Einspeisung priorisiert kann auf 400–500 W erhöhen.
-
-            Empfehlung: 250 W.
+            Obere Grenze bei sehr unruhigem Netz. Schützt vor übermäßigem Netzbezug.
+            Upper limit for very volatile grids. Prevents excessive grid draw.
+            Empfehlung / Recommended: 250 W.
           default: 250
           selector:
             number:
@@ -187,32 +160,24 @@ blueprint:
               unit_of_measurement: W
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ABSCHNITT 4 — Volatilitäts-Regler
+    # ABSCHNITT 4 / SECTION 4 — Volatilitäts-Regler / Volatility Controller
     # ══════════════════════════════════════════════════════════════════════════
     volatilitaet:
-      name: "📊 Volatilitäts-Regler"
+      name: "📊 Volatilitäts-Regler / Volatility Controller"
       description: >
-        Steuert wie empfindlich der Offset auf Netzschwankungen reagiert.
-        Die Formel lautet:
+        Steuert die Empfindlichkeit des Offsets auf Netzschwankungen.
+        Controls how sensitively the offset reacts to grid fluctuations.
 
-        `offset = min_offset + max(0, (StdDev − noise_floor) × faktor)`
-
-        Rausch-Schwelle und Faktor bestimmen gemeinsam ab wann und wie stark
-        der Offset auf Unruhe im Netz reagiert.
+        `offset = min_offset + max(0, (StdDev − noise_floor) × factor)`
       collapsed: true
       input:
 
         noise_floor:
-          name: 🔇 Rausch-Schwelle (W)
+          name: 🔇 Rausch-Schwelle / Noise Floor (W)
           description: >
-            StdDev-Werte unterhalb dieser Schwelle gelten als unvermeidliches
-            Grundrauschen des Messsystems und lösen keine Offset-Erhöhung aus.
-            Erst oberhalb dieser Schwelle beginnt der Volatilitäts-Faktor zu wirken.
-
-            Zu niedrig: Messrauschen des Zählers erhöht dauerhaft den Offset.
-            Zu hoch: Echte leichte Schwankungen werden ignoriert.
-
-            Empfehlung: 15 W (passend zur Shelly 3EM Genauigkeit).
+            StdDev unterhalb dieser Schwelle gilt als Messrauschen — löst keine Offset-Erhöhung aus.
+            StdDev below this threshold is treated as measurement noise — no offset increase.
+            Empfehlung / Recommended: 15 W (Shelly 3EM).
           default: 15
           selector:
             number:
@@ -221,20 +186,16 @@ blueprint:
               unit_of_measurement: W
 
         volatility_factor:
-          name: 📊 Volatilitäts-Faktor
+          name: 📊 Volatilitäts-Faktor / Volatility Factor
           description: >
-            Verstärkung der Netz-Volatilität auf den Offset. Je höher der Wert,
-            desto stärker reagiert der Offset auf Schwankungen.
+            Verstärkung der Netz-Volatilität auf den Offset.
+            Amplification of grid volatility on the offset.
 
-            Beispiele bei StdDev = 80 W, noise_floor = 15 W:
-            - Faktor 0.5 → +33 W über Minimum
-            - Faktor 1.5 → +98 W über Minimum  ← Standard
-            - Faktor 3.0 → +195 W über Minimum
+            Beispiele / Examples (StdDev=80 W, noise_floor=15 W):
+            0.5 → +33 W | 1.5 → +98 W (Standard/Default) | 3.0 → +195 W
 
-            Wer minimale Einspeisung priorisiert → Faktor erhöhen.
-            Wer Effizienz priorisiert → Faktor senken.
-
-            Empfehlung: 1.5.
+            Höher / Higher = mehr Schutz, mehr Bezug / more protection, more draw.
+            Empfehlung / Recommended: 1.5.
           default: 1.5
           selector:
             number:
@@ -242,10 +203,9 @@ blueprint:
               max: 5.0
               step: 0.1
 
-# Neustart bricht laufendes Spike-Bestätigungs-Delay ab, wenn neuer Wert kommt
+# Neustart bricht laufendes Spike-Bestätigungs-Delay ab / Restart cancels running spike confirmation delay
 mode: restart
 
-# Blueprint-Inputs als Template-Variablen deklarieren
 variables:
   grid_power_sensor: !input grid_power_sensor
   grid_stable_helper: !input grid_stable_helper
@@ -270,15 +230,15 @@ trigger:
 action:
   - condition: template
     value_template: "{{ offset_zone1_valid or offset_zone2_valid }}"
-    # Wenn false: Automation stoppt still (mode: restart, kein Fehler-Spam nötig)
-  # ── Schritt 1: Spike-Filterung ─────────────────────────────────────────────
+
+  # ── Schritt 1 / Step 1: Spike-Filterung / Spike Filtering ─────────────────
   - if:
       - condition: template
         value_template: >
           {{ (states(grid_power_sensor) | float(0) - states(grid_stable_helper) | float(0)) | abs
              > spike_threshold | float(300) }}
     then:
-      # Sprung zu groß → warten ob Wert stabil bleibt (Spike-Bestätigung)
+      # Sprung zu groß → warten / Jump too large → wait for confirmation
       - delay:
           seconds: "{{ spike_confirm_time | int(3) }}"
       - action: input_number.set_value
@@ -287,14 +247,14 @@ action:
         data:
           value: "{{ states(grid_power_sensor) | float(0) }}"
     else:
-      # Normaler Wert → sofort übernehmen
+      # Normaler Wert → sofort übernehmen / Normal value → accept immediately
       - action: input_number.set_value
         target:
           entity_id: !input grid_stable_helper
         data:
           value: "{{ states(grid_power_sensor) | float(0) }}"
 
-  # ── Schritt 2: Dynamischen Offset inline berechnen ─────────────────────────
+  # ── Schritt 2 / Step 2: Offset berechnen / Calculate offset ───────────────
   - variables:
       dynamic_offset: >
         {% set std_dev = states(stddev_sensor) | float(-1) %}
@@ -306,7 +266,7 @@ action:
           {{ [[min_offset | int(30), result] | max, cap_offset | int(250)] | min }}
         {% endif %}
 
-# ── Schritt 3: Offset in konfigurierte Zonen schreiben ─────────────────────
+  # ── Schritt 3 / Step 3: Offset in Zonen schreiben / Write offset to zones ──
   - choose:
       - conditions:
           - condition: template
