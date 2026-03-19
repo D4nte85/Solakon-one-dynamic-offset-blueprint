@@ -1,6 +1,6 @@
-# Solakon ONE — Dynamischer Offset (Spike-Filter & Volatilitäts-Regler)
+# Solakon ONE — Dynamischer Offset (Volatilitäts-Regler)
 
-> 🇩🇪 Deutsche Dokumentation. **[English version at the bottom ↓]**
+> 🇩🇪 Deutsche Dokumentation. **[English version at the bottom ↓](#english-documentation)**
 
 > Ergänzt die Nulleinspeisung um einen selbstanpassenden Offset. Der Blueprint analysiert die Netzschwankungen der letzten 60 Sekunden und erhöht den Sicherheitspuffer automatisch, wenn das Netz unruhig ist — z.B. durch taktende Verbraucher wie Kompressoren oder Waschmaschinen.
 
@@ -20,26 +20,14 @@ Regelziel = 0 W + Offset
 
 Ohne Offset würde der Regler auf 0 W einregeln. Bei fluktuierenden Geräten (Kompressor, Waschmaschine) führt das zu ständigem Ein-/Ausspeisen. Der dynamische Offset hält einen **Netzbezugspuffer**, der groß genug ist, um typische Schwankungen aufzufangen.
 
-Die Standardabweichung der letzten 60 Sekunden dient als Schätzung der nötigen Puffergröße — je unruhiger das Netz, desto größer der Offset. Da die gesamte Reaktionskette (Shelly ~1s → HA → Modbus → Inverter → MPPT-Ramping) mehrere Sekunden beträgt, passt sich der StdDev-Ansatz aus der Vergangenheit an: nach dem ersten Takt-Zyklus eines Geräts ist der Offset bereits kalibriert.
+Die Standardabweichung der letzten 60 Sekunden dient als Schätzung der nötigen Puffergröße — je unruhiger das Netz, desto größer der Offset. **Wichtig:** Spikes zählen dabei absichtlich in die StdDev hinein — schnelle Schwankungen in beide Richtungen sind genau das, was der Offset abfedern soll. Ein neues stabiles Lastniveau normalisiert die StdDev von selbst innerhalb der nächsten 60 Sekunden.
 
 ```
 Stromzähler (roh)
       │
       ▼
 ┌─────────────────────┐
-│   Spike-Filter      │  Sprünge > Schwelle → erst nach X s bestätigt
-│  (input_number)     │
-└─────────────────────┘
-      │
-      ▼
-┌─────────────────────┐
-│  Template-Brücke    │  input_number → sensor (HA-Statistik-Pflicht)
-│     (sensor)        │
-└─────────────────────┘
-      │
-      ▼
-┌─────────────────────┐
-│  StdDev 60s         │  Netz-Volatilität der letzten Minute
+│  StdDev 60s         │  Netz-Volatilität der letzten Minute (Spikes inklusive)
 │     (sensor)        │
 └─────────────────────┘
       │
@@ -56,62 +44,31 @@ Stromzähler (roh)
 
 | # | Typ | ID | Zweck |
 |---|-----|----|-------|
-| 1 | `input_number` | `solakon_netz_spike_gefiltert` | Spike-gefilterter Zwischenwert |
-| 2 | Template-Sensor | `solakon_netz_brucke` | Brücke für Statistik-Sensor |
-| 3 | Statistik-Sensor | `solakon_grid_stddev_60s` | Standardabweichung über 60 s |
-| 4 | `input_number` | `solakon_offset_zone1` | Offset-Ausgabe Zone 1 |
-| 5 | `input_number` | `solakon_offset_zone2` | Offset-Ausgabe Zone 2 |
+| 1 | Statistik-Sensor | `solakon_grid_stddev_60s` | Standardabweichung über 60 s |
+| 2 | `input_number` | `solakon_offset_zone1` | Offset-Ausgabe Zone 1 |
+| 3 | `input_number` | `solakon_offset_zone2` | Offset-Ausgabe Zone 2 |
 
-> **Reihenfolge einhalten!** Jeder Helfer hängt vom vorherigen ab.
+> **Reihenfolge einhalten!** Der Statistik-Sensor muss vor dem Blueprint angelegt werden.
 
 ---
 
 ## Schritt-für-Schritt Einrichtung
 
-### Schritt 1 — Spike-Filter Puffer
-
-*Einstellungen → Geräte & Dienste → Helfer → **Zahl erstellen***
-
-| Feld | Wert |
-|------|------|
-| Name | `Solakon Netz spike-gefiltert` |
-| Objekt-ID | `solakon_netz_spike_gefiltert` |
-| Minimalwert | `-10000` |
-| Maximalwert | `10000` |
-| Einheit | `W` |
-
-### Schritt 2 — Statistik-Brücke
-
-*Helfer → **Template → Sensor erstellen***
-
-> ⚠️ Pflicht: Home Assistant akzeptiert kein `input_number` direkt als Statistik-Eingabe.
-
-| Feld | Wert |
-|------|------|
-| Name | `Solakon Netz Brücke` |
-| Objekt-ID | `solakon_netz_brucke` |
-| Einheit | `W` |
-| Zustandsklasse | `measurement` |
-| Geräteklasse | `power` |
-
-**Zustandstemplate:**
-```jinja2
-{{ states('input_number.solakon_netz_spike_gefiltert') | float(0) }}
-```
-
-### Schritt 3 — Statistik-Sensor (StdDev 60s)
+### Schritt 1 — Statistik-Sensor (StdDev 60s)
 
 *Helfer → **Statistik erstellen***
+
+> Der Statistik-Sensor liest direkt vom Roh-Sensor (z.B. `sensor.shelly3em_power`). Kein Zwischenschritt nötig.
 
 | Feld | Wert |
 |------|------|
 | Name | `Solakon Grid StdDev 60s` |
 | Objekt-ID | `solakon_grid_stddev_60s` |
-| Eingabesensor | `sensor.solakon_netz_brucke` |
+| Eingabesensor | `sensor.shelly3em_power` *(oder eigener Zähler-Sensor)* |
 | Charakteristik | Standardabweichung |
 | Zeitraum | `00:01:00` |
 
-### Schritt 4 — Ziel-Helfer für Offset-Ausgabe
+### Schritt 2 — Ziel-Helfer für Offset-Ausgabe
 
 *Helfer → **Zahl erstellen** — je einmal für Zone 1 und Zone 2*
 
@@ -122,7 +79,7 @@ Stromzähler (roh)
 | Min / Max | `0` / `500` | `0` / `500` |
 | Einheit | `W` | `W` |
 
-### Schritt 5 — Blueprint importieren & Automation anlegen
+### Schritt 3 — Blueprint importieren & Automation anlegen
 
 1. Blueprint-Datei nach `config/blueprints/automation/solakon/` kopieren
 2. *Einstellungen → Automationen → **Blueprint-Automation erstellen***
@@ -137,8 +94,6 @@ Stromzähler (roh)
 
 | Parameter | Beschreibung |
 |-----------|-------------|
-| 🔌 Netz-Leistungssensor | Roher Zähler-Sensor (z.B. `sensor.shelly3em_power`) |
-| 🗃️ Spike-Filter Puffer | `input_number.solakon_netz_spike_gefiltert` |
 | 📊 Statistik-Sensor | `sensor.solakon_grid_stddev_60s` |
 | 🎯 Ziel-Helper Zone 1/2 | `input_number.solakon_offset_zone1/2` |
 
@@ -146,8 +101,6 @@ Stromzähler (roh)
 
 | Parameter | Standard | Beschreibung |
 |-----------|----------|--------------|
-| ⚡ Spike-Schwelle | `300 W` | Sprünge über diesem Wert → Spike-Verdacht |
-| ⏱️ Bestätigungszeit | `3 s` | Wartezeit vor Übernahme eines Spike-Werts |
 | 📉 Minimaler Offset | `30 W` | Grundpuffer bei ruhigem Netz |
 | 📈 Maximaler Offset | `250 W` | Obergrenze bei unruhigem Netz |
 | 🔇 Rausch-Schwelle | `15 W` | StdDev darunter = Grundrauschen |
@@ -177,7 +130,7 @@ offset            = clamp(min_offset + volatility_buffer, min_offset, cap_offset
 | Symptom | Lösung |
 |---------|--------|
 | Offset bleibt auf Minimum | `sensor.solakon_grid_stddev_60s` prüfen — ggf. einige Minuten nach Ersteinrichtung warten |
-| Offset reagiert zu träge | Bestätigungszeit senken oder Spike-Schwelle erhöhen |
+| Offset reagiert zu träge | Volatilitäts-Faktor erhöhen oder Rausch-Schwelle senken |
 | Offset zu aggressiv | Volatilitäts-Faktor oder maximalen Offset reduzieren |
 | `input_number` nimmt keinen Wert an | Min/Max-Bereich prüfen (0–500 W empfohlen) |
 
@@ -187,7 +140,7 @@ offset            = clamp(min_offset + volatility_buffer, min_offset, cap_offset
 
 # English Documentation
 
-> 🇬🇧 English documentation. **[Deutsche Version oben ↑](#solakon-one--dynamischer-offset-spike-filter--volatilitäts-regler)**
+> 🇬🇧 English documentation. **[Deutsche Version oben ↑](#solakon-one--dynamischer-offset-volatilitäts-regler)**
 
 > Adds a self-adjusting offset to zero-feed-in control. The blueprint analyses grid fluctuations over the last 60 seconds and automatically increases the safety buffer when the grid is volatile — e.g. due to cycling loads like compressors or washing machines.
 
@@ -201,7 +154,7 @@ Target = 0 W + Offset
 
 Without an offset, the controller regulates to 0 W. With cycling devices this causes constant feed-in/draw oscillation. The dynamic offset maintains a **grid draw buffer** large enough to absorb typical fluctuations.
 
-The standard deviation over 60 seconds estimates the required buffer size. Since the full reaction chain (Shelly ~1s → HA → Modbus → Inverter → MPPT ramp) takes several seconds, the StdDev approach adapts from history — after the first cycle of a device, the offset is already calibrated.
+The standard deviation over 60 seconds estimates the required buffer size. **Importantly:** spikes intentionally count toward the StdDev — fast swings in both directions are exactly what the offset is meant to absorb. A new stable load level normalises the StdDev on its own within the next 60 seconds.
 
 ---
 
@@ -209,61 +162,31 @@ The standard deviation over 60 seconds estimates the required buffer size. Since
 
 | # | Type | ID | Purpose |
 |---|------|----|---------|
-| 1 | `input_number` | `solakon_netz_spike_gefiltert` | Spike-filtered intermediate value |
-| 2 | Template sensor | `solakon_netz_brucke` | Bridge for statistics sensor |
-| 3 | Statistics sensor | `solakon_grid_stddev_60s` | Standard deviation over 60 s |
-| 4 | `input_number` | `solakon_offset_zone1` | Offset output Zone 1 |
-| 5 | `input_number` | `solakon_offset_zone2` | Offset output Zone 2 |
+| 1 | Statistics sensor | `solakon_grid_stddev_60s` | Standard deviation over 60 s |
+| 2 | `input_number` | `solakon_offset_zone1` | Offset output Zone 1 |
+| 3 | `input_number` | `solakon_offset_zone2` | Offset output Zone 2 |
 
-> **Order matters!** Each helper depends on the previous one.
+> **Order matters!** The statistics sensor must be created before the blueprint.
 
 ---
 
 ## Step-by-Step Setup
 
-### Step 1 — Spike-Filter Buffer
-
-*Settings → Devices & Services → Helpers → **Create number***
-
-| Field | Value |
-|-------|-------|
-| Name | `Solakon Netz spike-gefiltert` |
-| Object ID | `solakon_netz_spike_gefiltert` |
-| Min / Max | `-10000` / `10000` |
-| Unit | `W` |
-
-### Step 2 — Statistics Bridge
-
-*Helpers → **Template → Create sensor***
-
-> ⚠️ Required: Home Assistant does not accept `input_number` directly as a statistics input.
-
-| Field | Value |
-|-------|-------|
-| Name | `Solakon Netz Brücke` |
-| Object ID | `solakon_netz_brucke` |
-| Unit | `W` |
-| State class | `measurement` |
-| Device class | `power` |
-
-**State template:**
-```jinja2
-{{ states('input_number.solakon_netz_spike_gefiltert') | float(0) }}
-```
-
-### Step 3 — Statistics Sensor (StdDev 60s)
+### Step 1 — Statistics Sensor (StdDev 60s)
 
 *Helpers → **Create statistic***
+
+> The statistics sensor reads directly from the raw sensor (e.g. `sensor.shelly3em_power`). No intermediate step required.
 
 | Field | Value |
 |-------|-------|
 | Name | `Solakon Grid StdDev 60s` |
 | Object ID | `solakon_grid_stddev_60s` |
-| Input sensor | `sensor.solakon_netz_brucke` |
+| Input sensor | `sensor.shelly3em_power` *(or your own meter sensor)* |
 | Characteristic | Standard deviation |
 | Time period | `00:01:00` |
 
-### Step 4 — Offset Output Helpers
+### Step 2 — Offset Output Helpers
 
 *Helpers → **Create number** — once for Zone 1, once for Zone 2*
 
@@ -274,7 +197,7 @@ The standard deviation over 60 seconds estimates the required buffer size. Since
 | Min / Max | `0` / `500` | `0` / `500` |
 | Unit | `W` | `W` |
 
-### Step 5 — Import Blueprint & Create Automation
+### Step 3 — Import Blueprint & Create Automation
 
 1. Copy blueprint file to `config/blueprints/automation/solakon/`
 2. *Settings → Automations → **Create blueprint automation***
@@ -289,8 +212,6 @@ The standard deviation over 60 seconds estimates the required buffer size. Since
 
 | Parameter | Description |
 |-----------|-------------|
-| 🔌 Grid Power Sensor | Raw meter sensor (e.g. `sensor.shelly3em_power`) |
-| 🗃️ Spike-Filter Buffer | `input_number.solakon_netz_spike_gefiltert` |
 | 📊 Statistics Sensor | `sensor.solakon_grid_stddev_60s` |
 | 🎯 Target Helper Zone 1/2 | `input_number.solakon_offset_zone1/2` |
 
@@ -298,8 +219,6 @@ The standard deviation over 60 seconds estimates the required buffer size. Since
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| ⚡ Spike Threshold | `300 W` | Deviations above this value trigger spike detection |
-| ⏱️ Confirmation Time | `3 s` | Wait time before accepting a spike value |
 | 📉 Minimum Offset | `30 W` | Base buffer during calm grid conditions |
 | 📈 Maximum Offset | `250 W` | Upper limit during volatile conditions |
 | 🔇 Noise Floor | `15 W` | StdDev below this = measurement noise |
@@ -329,6 +248,6 @@ offset            = clamp(min_offset + volatility_buffer, min_offset, cap_offset
 | Symptom | Solution |
 |---------|----------|
 | Offset stays at minimum | Check `sensor.solakon_grid_stddev_60s` — may need a few minutes after first setup |
-| Offset too slow to react | Lower confirmation time or raise spike threshold |
+| Offset too slow to react | Increase volatility factor or lower noise floor |
 | Offset too aggressive | Reduce volatility factor or maximum offset |
 | `input_number` rejects values | Check min/max range (0–500 W recommended) |
