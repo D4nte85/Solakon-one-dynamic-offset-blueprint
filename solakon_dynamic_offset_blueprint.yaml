@@ -1,13 +1,11 @@
 blueprint:
-  name: Solakon ONE — Dynamischer Offset (Spike-Filter + Volatilitäts-Regler)
+  name: Solakon ONE — Dynamischer Offset (Volatilitäts-Regler)
   description: |
     ### Dynamischer Nullpunkt-Offset / Dynamic Zero-Point Offset
-    Filtert Netzspitzen und schreibt den berechneten Offset in die Ziel-Helfer.
-    Filters grid spikes and writes the calculated offset to the target helpers.
+    Berechnet einen selbstanpassenden Offset aus der Netz-Volatilität und schreibt ihn in die Ziel-Helfer.
+    Calculates a self-adjusting offset from grid volatility and writes it to the target helpers.
 
     **Erforderliche Helfer / Required helpers:**
-    - `input_number.solakon_netz_spike_gefiltert`
-    - `sensor.solakon_netz_brucke`
     - `sensor.solakon_grid_stddev_60s`
     - `input_number.solakon_offset_zone1` / `_zone2`
   source_url: https://github.com/D4nte85/Solakon-one-dynamic-offset-blueprint/blob/main/solakon_dynamic_offset_blueprint.yaml
@@ -25,32 +23,11 @@ blueprint:
       collapsed: false
       input:
 
-        grid_power_sensor:
-          name: 🔌 Netz-Leistungssensor / Grid Power Sensor
-          description: >
-            Roher Messwert des Stromzählers — z.B. `sensor.shelly3em_power`.
-            Raw meter reading — e.g. `sensor.shelly3em_power`.
-          selector:
-            entity:
-              domain: sensor
-              device_class: power
-
-        grid_stable_helper:
-          name: 🗃️ Spike-Filter Puffer / Spike-Filter Buffer
-          description: >
-            `input_number` der den letzten akzeptierten (spike-gefilterten) Netzwert speichert.
-            `input_number` storing the last accepted (spike-filtered) grid value.
-            Standard / Default: `input_number.solakon_netz_spike_gefiltert`
-          default: input_number.solakon_netz_spike_gefiltert
-          selector:
-            entity:
-              domain: input_number
-
         stddev_sensor:
           name: 📊 Statistik-Sensor (StdDev 60s)
           description: >
-            Misst die Standardabweichung des spike-gefilterten Netzwerts der letzten 60 s.
-            Measures the standard deviation of the spike-filtered grid value over 60 s.
+            Misst die Standardabweichung des Roh-Netzwerts der letzten 60 s — Spikes inklusive.
+            Measures the standard deviation of the raw grid value over 60 s — spikes included.
             Standard / Default: `sensor.solakon_grid_stddev_60s`
           default: sensor.solakon_grid_stddev_60s
           selector:
@@ -80,50 +57,7 @@ blueprint:
               domain: input_number
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ABSCHNITT 2 / SECTION 2 — Spike-Filter
-    # ══════════════════════════════════════════════════════════════════════════
-    spike_filter:
-      name: "⚡ Spike-Filter"
-      description: >
-        Unterscheidet echte Laständerungen von kurzen Stromspitzen (z.B. Kompressor-Anlaufstrom).
-        Echte Änderungen werden nach der Bestätigungszeit übernommen.
-        Distinguishes real load changes from short spikes (e.g. compressor inrush).
-        Real changes are accepted after the confirmation delay.
-      collapsed: true
-      input:
-
-        spike_threshold:
-          name: ⚡ Spike-Schwelle / Spike Threshold (W)
-          description: >
-            Abweichung vom letzten Wert, ab der ein Spike-Verdacht ausgelöst wird.
-            Deviation from the last value that triggers spike detection.
-            Zu niedrig / Too low: verzögert normale Schwankungen.
-            Zu hoch / Too high: Anlaufstrom verfälscht die Volatilitätsmessung.
-            Empfehlung / Recommended: 300–400 W.
-          default: 300
-          selector:
-            number:
-              min: 50
-              max: 1000
-              unit_of_measurement: W
-
-        spike_confirm_time:
-          name: ⏱️ Bestätigungszeit / Confirmation Time (s)
-          description: >
-            Wartezeit bis ein Spike-Verdacht als echte Laständerung gilt.
-            Ein neuer Wert in dieser Zeit (mode: restart) verwirft den Spike.
-            Wait time until a spike candidate is accepted as a real load change.
-            A new value during this time (mode: restart) discards the spike.
-            Empfehlung / Recommended: 3 s.
-          default: 3
-          selector:
-            number:
-              min: 1
-              max: 10
-              unit_of_measurement: s
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # ABSCHNITT 3 / SECTION 3 — Offset-Grenzen / Offset Limits
+    # ABSCHNITT 2 / SECTION 2 — Offset-Grenzen / Offset Limits
     # ══════════════════════════════════════════════════════════════════════════
     offset_grenzen:
       name: "📏 Offset-Grenzen / Offset Limits"
@@ -160,7 +94,7 @@ blueprint:
               unit_of_measurement: W
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ABSCHNITT 4 / SECTION 4 — Volatilitäts-Regler / Volatility Controller
+    # ABSCHNITT 3 / SECTION 3 — Volatilitäts-Regler / Volatility Controller
     # ══════════════════════════════════════════════════════════════════════════
     volatilitaet:
       name: "📊 Volatilitäts-Regler / Volatility Controller"
@@ -203,15 +137,12 @@ blueprint:
               max: 5.0
               step: 0.1
 
-# Neustart bricht laufendes Spike-Bestätigungs-Delay ab / Restart cancels running spike confirmation delay
-mode: restart
+# Single: StdDev-Updates während laufender Ausführung werden verworfen — kein Datenverlust, da StdDev träge ist.
+# Single: StdDev updates during execution are discarded — no data loss since StdDev changes slowly.
+mode: single
 
 variables:
-  grid_power_sensor: !input grid_power_sensor
-  grid_stable_helper: !input grid_stable_helper
   stddev_sensor: !input stddev_sensor
-  spike_threshold: !input spike_threshold
-  spike_confirm_time: !input spike_confirm_time
   min_offset: !input min_offset
   cap_offset: !input cap_offset
   noise_floor: !input noise_floor
@@ -223,38 +154,15 @@ variables:
   offset_zone2_valid: >
     {{ offset_zone2_entity is string and offset_zone2_entity | length > 0 }}
 
-trigger:
-  - platform: state
-    entity_id: !input grid_power_sensor
+triggers:
+  - trigger: state
+    entity_id: !input stddev_sensor
 
-action:
+actions:
   - condition: template
     value_template: "{{ offset_zone1_valid or offset_zone2_valid }}"
 
-  # ── Schritt 1 / Step 1: Spike-Filterung / Spike Filtering ─────────────────
-  - if:
-      - condition: template
-        value_template: >
-          {{ (states(grid_power_sensor) | float(0) - states(grid_stable_helper) | float(0)) | abs
-             > spike_threshold | float(300) }}
-    then:
-      # Sprung zu groß → warten / Jump too large → wait for confirmation
-      - delay:
-          seconds: "{{ spike_confirm_time | int(3) }}"
-      - action: input_number.set_value
-        target:
-          entity_id: !input grid_stable_helper
-        data:
-          value: "{{ states(grid_power_sensor) | float(0) }}"
-    else:
-      # Normaler Wert → sofort übernehmen / Normal value → accept immediately
-      - action: input_number.set_value
-        target:
-          entity_id: !input grid_stable_helper
-        data:
-          value: "{{ states(grid_power_sensor) | float(0) }}"
-
-  # ── Schritt 2 / Step 2: Offset berechnen / Calculate offset ───────────────
+  # ── Offset berechnen / Calculate offset ───────────────────────────────────
   - variables:
       dynamic_offset: >
         {% set std_dev = states(stddev_sensor) | float(-1) %}
@@ -266,7 +174,7 @@ action:
           {{ [[min_offset | int(30), result] | max, cap_offset | int(250)] | min }}
         {% endif %}
 
-  # ── Schritt 3 / Step 3: Offset in Zonen schreiben / Write offset to zones ──
+  # ── Offset in Zonen schreiben / Write offset to zones ─────────────────────
   - choose:
       - conditions:
           - condition: template
