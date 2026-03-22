@@ -33,7 +33,7 @@ Stromzähler (roh)
       │
       ▼
 ┌─────────────────────┐
-│  Blueprint          │  Berechnet Offset → Zone 1 & Zone 2
+│  Blueprint          │  Berechnet Offset → Zone 1, Zone 2 & Zone AC
 │  (Automation)       │
 └─────────────────────┘
 ```
@@ -45,10 +45,12 @@ Stromzähler (roh)
 | # | Typ | ID | Zweck |
 |---|-----|----|-------|
 | 1 | Statistik-Sensor | `solakon_grid_stddev_60s` | Standardabweichung über 60 s |
-| 2 | `input_number` | `solakon_offset_zone1` | Offset-Ausgabe Zone 1 |
-| 3 | `input_number` | `solakon_offset_zone2` | Offset-Ausgabe Zone 2 |
+| 2 | `input_number` | `solakon_offset_zone1` | Offset-Ausgabe Zone 1 *(optional)* |
+| 3 | `input_number` | `solakon_offset_zone2` | Offset-Ausgabe Zone 2 *(optional)* |
+| 4 | `input_number` | `solakon_offset_zone_ac` | Offset-Ausgabe Zone AC *(optional)* |
 
 > **Reihenfolge einhalten!** Der Statistik-Sensor muss vor dem Blueprint angelegt werden.
+> **Mindestens einer** der Ziel-Helfer (Zone 1, Zone 2, Zone AC) muss konfiguriert sein.
 
 ---
 
@@ -70,14 +72,14 @@ Stromzähler (roh)
 
 ### Schritt 2 — Ziel-Helfer für Offset-Ausgabe
 
-*Helfer → **Zahl erstellen** — je einmal für Zone 1 und Zone 2*
+*Helfer → **Zahl erstellen** — je nach Bedarf für Zone 1, Zone 2 und/oder Zone AC*
 
-| Feld | Zone 1 | Zone 2 |
-|------|--------|--------|
-| Name | `Solakon Offset Zone1` | `Solakon Offset Zone2` |
-| Objekt-ID | `solakon_offset_zone1` | `solakon_offset_zone2` |
-| Min / Max | `0` / `500` | `0` / `500` |
-| Einheit | `W` | `W` |
+| Feld | Zone 1 | Zone 2 | Zone AC |
+|------|--------|--------|---------|
+| Name | `Solakon Offset Zone1` | `Solakon Offset Zone2` | `Solakon Offset Zone AC` |
+| Objekt-ID | `solakon_offset_zone1` | `solakon_offset_zone2` | `solakon_offset_zone_ac` |
+| Min / Max | `0` / `500` | `0` / `500` | `0` / `500` |
+| Einheit | `W` | `W` | `W` |
 
 ### Schritt 3 — Blueprint importieren & Automation anlegen
 
@@ -95,7 +97,14 @@ Stromzähler (roh)
 | Parameter | Beschreibung |
 |-----------|-------------|
 | 📊 Statistik-Sensor | `sensor.solakon_grid_stddev_60s` |
-| 🎯 Ziel-Helper Zone 1/2 | `input_number.solakon_offset_zone1/2` |
+
+### Ziel-Helfer (mind. einer erforderlich)
+
+| Parameter | Beschreibung |
+|-----------|-------------|
+| 🎯 Ziel-Helper Zone 1 | `input_number.solakon_offset_zone1` |
+| 🎯 Ziel-Helper Zone 2 | `input_number.solakon_offset_zone2` |
+| 🎯 Ziel-Helper Zone AC | `input_number.solakon_offset_zone_ac` |
 
 ### Optionale Parameter
 
@@ -133,6 +142,7 @@ offset            = clamp(min_offset + volatility_buffer, min_offset, cap_offset
 | Offset reagiert zu träge | Volatilitäts-Faktor erhöhen oder Rausch-Schwelle senken |
 | Offset zu aggressiv | Volatilitäts-Faktor oder maximalen Offset reduzieren |
 | `input_number` nimmt keinen Wert an | Min/Max-Bereich prüfen (0–500 W empfohlen) |
+| Automation läuft nicht | Prüfen ob mindestens ein Ziel-Helfer (Zone 1/2/AC) konfiguriert ist |
 
 ---
 
@@ -163,10 +173,12 @@ The standard deviation over 60 seconds estimates the required buffer size. **Imp
 | # | Type | ID | Purpose |
 |---|------|----|---------|
 | 1 | Statistics sensor | `solakon_grid_stddev_60s` | Standard deviation over 60 s |
-| 2 | `input_number` | `solakon_offset_zone1` | Offset output Zone 1 |
-| 3 | `input_number` | `solakon_offset_zone2` | Offset output Zone 2 |
+| 2 | `input_number` | `solakon_offset_zone1` | Offset output Zone 1 *(optional)* |
+| 3 | `input_number` | `solakon_offset_zone2` | Offset output Zone 2 *(optional)* |
+| 4 | `input_number` | `solakon_offset_zone_ac` | Offset output Zone AC *(optional)* |
 
 > **Order matters!** The statistics sensor must be created before the blueprint.
+> **At least one** of the target helpers (Zone 1, Zone 2, Zone AC) must be configured.
 
 ---
 
@@ -188,14 +200,14 @@ The standard deviation over 60 seconds estimates the required buffer size. **Imp
 
 ### Step 2 — Offset Output Helpers
 
-*Helpers → **Create number** — once for Zone 1, once for Zone 2*
+*Helpers → **Create number** — as needed for Zone 1, Zone 2, and/or Zone AC*
 
-| Field | Zone 1 | Zone 2 |
-|-------|--------|--------|
-| Name | `Solakon Offset Zone1` | `Solakon Offset Zone2` |
-| Object ID | `solakon_offset_zone1` | `solakon_offset_zone2` |
-| Min / Max | `0` / `500` | `0` / `500` |
-| Unit | `W` | `W` |
+| Field | Zone 1 | Zone 2 | Zone AC |
+|-------|--------|--------|---------|
+| Name | `Solakon Offset Zone1` | `Solakon Offset Zone2` | `Solakon Offset Zone AC` |
+| Object ID | `solakon_offset_zone1` | `solakon_offset_zone2` | `solakon_offset_zone_ac` |
+| Min / Max | `0` / `500` | `0` / `500` | `0` / `500` |
+| Unit | `W` | `W` | `W` |
 
 ### Step 3 — Import Blueprint & Create Automation
 
@@ -213,7 +225,14 @@ The standard deviation over 60 seconds estimates the required buffer size. **Imp
 | Parameter | Description |
 |-----------|-------------|
 | 📊 Statistics Sensor | `sensor.solakon_grid_stddev_60s` |
-| 🎯 Target Helper Zone 1/2 | `input_number.solakon_offset_zone1/2` |
+
+### Target Helpers (at least one required)
+
+| Parameter | Description |
+|-----------|-------------|
+| 🎯 Target Helper Zone 1 | `input_number.solakon_offset_zone1` |
+| 🎯 Target Helper Zone 2 | `input_number.solakon_offset_zone2` |
+| 🎯 Target Helper Zone AC | `input_number.solakon_offset_zone_ac` |
 
 ### Optional Parameters
 
@@ -251,3 +270,4 @@ offset            = clamp(min_offset + volatility_buffer, min_offset, cap_offset
 | Offset too slow to react | Increase volatility factor or lower noise floor |
 | Offset too aggressive | Reduce volatility factor or maximum offset |
 | `input_number` rejects values | Check min/max range (0–500 W recommended) |
+| Automation does not run | Verify at least one target helper (Zone 1/2/AC) is configured |
