@@ -7,7 +7,7 @@ blueprint:
 
     **Erforderliche Helfer / Required helpers:**
     - `sensor.solakon_grid_stddev_60s`
-    - `input_number.solakon_offset_zone1` / `_zone2`
+    - `input_number.solakon_offset_zone1` / `_zone2` / `_zone_ac` (mind. einer / at least one)
   source_url: https://github.com/D4nte85/Solakon-one-dynamic-offset-blueprint/blob/main/solakon_dynamic_offset_blueprint.yaml
   domain: automation
   input:
@@ -37,8 +37,8 @@ blueprint:
         offset_zone1_helper:
           name: 🎯 Ziel-Helper Zone 1 (Optional)
           description: >
-            Offset-Ausgabe für Zone 1. Mindestens einer der beiden Helfer muss konfiguriert sein.
-            Offset output for Zone 1. At least one of the two helpers must be configured.
+            Offset-Ausgabe für Zone 1. Mindestens einer der drei Helfer muss konfiguriert sein.
+            Offset output for Zone 1. At least one of the three helpers must be configured.
             Standard / Default: `input_number.solakon_offset_zone1`
           default: {}
           selector:
@@ -48,9 +48,20 @@ blueprint:
         offset_zone2_helper:
           name: 🎯 Ziel-Helper Zone 2 (Optional)
           description: >
-            Offset-Ausgabe für Zone 2. Mindestens einer der beiden Helfer muss konfiguriert sein.
-            Offset output for Zone 2. At least one of the two helpers must be configured.
+            Offset-Ausgabe für Zone 2. Mindestens einer der drei Helfer muss konfiguriert sein.
+            Offset output for Zone 2. At least one of the three helpers must be configured.
             Standard / Default: `input_number.solakon_offset_zone2`
+          default: {}
+          selector:
+            entity:
+              domain: input_number
+
+        offset_zone_ac_helper:
+          name: 🎯 Ziel-Helper Zone AC (Optional)
+          description: >
+            Offset-Ausgabe für AC-Laden. Mindestens einer der drei Helfer muss konfiguriert sein.
+            Offset output for AC charging. At least one of the three helpers must be configured.
+            Standard / Default: `input_number.solakon_offset_zone_ac`
           default: {}
           selector:
             entity:
@@ -149,10 +160,13 @@ variables:
   volatility_factor: !input volatility_factor
   offset_zone1_entity: !input offset_zone1_helper
   offset_zone2_entity: !input offset_zone2_helper
+  offset_zone_ac_entity: !input offset_zone_ac_helper
   offset_zone1_valid: >
     {{ offset_zone1_entity is string and offset_zone1_entity | length > 0 }}
   offset_zone2_valid: >
     {{ offset_zone2_entity is string and offset_zone2_entity | length > 0 }}
+  offset_zone_ac_valid: >
+    {{ offset_zone_ac_entity is string and offset_zone_ac_entity | length > 0 }}
 
 triggers:
   - trigger: state
@@ -160,7 +174,7 @@ triggers:
 
 actions:
   - condition: template
-    value_template: "{{ offset_zone1_valid or offset_zone2_valid }}"
+    value_template: "{{ offset_zone1_valid or offset_zone2_valid or offset_zone_ac_valid }}"
 
   # ── Offset berechnen / Calculate offset ───────────────────────────────────
   - variables:
@@ -193,5 +207,15 @@ actions:
           - action: input_number.set_value
             target:
               entity_id: "{{ offset_zone2_entity }}"
+            data:
+              value: "{{ dynamic_offset }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ offset_zone_ac_valid }}"
+        sequence:
+          - action: input_number.set_value
+            target:
+              entity_id: "{{ offset_zone_ac_entity }}"
             data:
               value: "{{ dynamic_offset }}"
