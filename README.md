@@ -2,7 +2,7 @@
 
 > 🇩🇪 Deutsche Dokumentation. **[English version at the bottom ↓](#english-documentation)**
 
-> Ergänzt die Nulleinspeisung um einen selbstanpassenden Offset. Der Blueprint analysiert die Netzschwankungen der letzten 60 Sekunden und erhöht den Sicherheitspuffer automatisch, wenn das Netz unruhig ist — z.B. durch taktende Verbraucher wie Kompressoren oder Waschmaschinen.
+> Ergänzt die Nulleinspeisung um einen selbstanpassenden Offset. Der Blueprint analysiert die Netzschwankungen der letzten 60 Sekunden und erhöht den Sicherheitspuffer automatisch, wenn das Netz unruhig ist — z.B. durch taktende Verbraucher wie Kompressoren oder Waschmaschinen. Jede Zone ist einzeln konfigurierbar, inkl. optionalem negativem Offset (Einspeisung statt Bezug).
 
 ## Installation
 
@@ -12,15 +12,14 @@
 
 ## Grundprinzip
 
-Der Blueprint verschiebt das Regelziel des PI-Reglers nach oben:
+Der Blueprint verschiebt das Regelziel des PI-Reglers:
 
 ```
-Regelziel = 0 W + Offset
+Regelziel = 0 W + Offset     (positiv → Netzbezugspuffer)
+Regelziel = 0 W − Offset     (negativ → leichte Einspeisung)
 ```
 
-Ohne Offset würde der Regler auf 0 W einregeln. Bei fluktuierenden Geräten (Kompressor, Waschmaschine) führt das zu ständigem Ein-/Ausspeisen. Der dynamische Offset hält einen **Netzbezugspuffer**, der groß genug ist, um typische Schwankungen aufzufangen.
-
-Die Standardabweichung der letzten 60 Sekunden dient als Schätzung der nötigen Puffergröße — je unruhiger das Netz, desto größer der Offset. **Wichtig:** Spikes zählen dabei absichtlich in die StdDev hinein — schnelle Schwankungen in beide Richtungen sind genau das, was der Offset abfedern soll. Ein neues stabiles Lastniveau normalisiert die StdDev von selbst innerhalb der nächsten 60 Sekunden.
+Die Standardabweichung der letzten 60 Sekunden schätzt die nötige Puffergröße. Spikes zählen dabei absichtlich in die StdDev hinein — schnelle Schwankungen in beide Richtungen sind genau das, was der Offset abfedern soll. Ein neues stabiles Lastniveau normalisiert die StdDev von selbst innerhalb der nächsten 60 Sekunden.
 
 ```
 Stromzähler (roh)
@@ -33,8 +32,8 @@ Stromzähler (roh)
       │
       ▼
 ┌─────────────────────┐
-│  Blueprint          │  Berechnet Offset → Zone 1, Zone 2 & Zone AC
-│  (Automation)       │
+│  Blueprint          │  Berechnet Offset je Zone → Zone 1, Zone 2, Zone AC
+│  (Automation)       │  (eigene Parameter & Richtung pro Zone)
 └─────────────────────┘
 ```
 
@@ -78,59 +77,63 @@ Stromzähler (roh)
 |------|--------|--------|---------|
 | Name | `Solakon Offset Zone1` | `Solakon Offset Zone2` | `Solakon Offset Zone AC` |
 | Objekt-ID | `solakon_offset_zone1` | `solakon_offset_zone2` | `solakon_offset_zone_ac` |
-| Min / Max | `0` / `500` | `0` / `500` | `0` / `500` |
+| Min | `0` *(oder `−500` bei negativem Offset)* | idem | idem |
+| Max | `500` | `500` | `500` |
 | Einheit | `W` | `W` | `W` |
+
+> ⚠️ **Negativer Offset:** Der `input_number`-Helfer muss `min: −500` (oder kleiner) gesetzt haben, damit negative Werte angenommen werden. Ein Helfer mit `min: 0` verwirft negative Werte stillschweigend.
 
 ### Schritt 3 — Blueprint importieren & Automation anlegen
 
 1. Blueprint-Datei nach `config/blueprints/automation/solakon/` kopieren
 2. *Einstellungen → Automationen → **Blueprint-Automation erstellen***
 3. Blueprint `Solakon ONE — Dynamischer Offset` wählen
-4. Pflichtfelder belegen, optionale Parameter anpassen
+4. Pflichtfelder belegen, optionale Parameter pro Zone anpassen
 
 ---
 
 ## Blueprint-Parameter
 
-### Pflichtfelder
+### Statistik-Sensor (Pflicht)
 
 | Parameter | Beschreibung |
 |-----------|-------------|
 | 📊 Statistik-Sensor | `sensor.solakon_grid_stddev_60s` |
 
-### Ziel-Helfer (mind. einer erforderlich)
+### Zone 1 / Zone 2 / Zone AC — je einzeln konfigurierbar
 
-| Parameter | Beschreibung |
-|-----------|-------------|
-| 🎯 Ziel-Helper Zone 1 | `input_number.solakon_offset_zone1` |
-| 🎯 Ziel-Helper Zone 2 | `input_number.solakon_offset_zone2` |
-| 🎯 Ziel-Helper Zone AC | `input_number.solakon_offset_zone_ac` |
-
-### Optionale Parameter
+Jede Zone hat einen eigenen Abschnitt mit identischer Parameterstruktur:
 
 | Parameter | Standard | Beschreibung |
 |-----------|----------|--------------|
+| 🎯 Ziel-Helper | *(leer)* | `input_number`-Helfer für den Ausgabewert |
+| ↕️ Negativer Offset | `Aus` | Ein → Offset wird negiert (Regelziel < 0 W) |
 | 📉 Minimaler Offset | `30 W` | Grundpuffer bei ruhigem Netz |
 | 📈 Maximaler Offset | `250 W` | Obergrenze bei unruhigem Netz |
-| 🔇 Rausch-Schwelle | `15 W` | StdDev darunter = Grundrauschen |
+| 🔇 Rausch-Schwelle | `15 W` | StdDev darunter = Grundrauschen, kein Anstieg |
 | 📊 Volatilitäts-Faktor | `1.5` | Verstärkung oberhalb der Rausch-Schwelle |
 
-### Offset-Formel
+---
+
+## Offset-Formel & Richtung
 
 ```
-volatility_buffer = max(0, (StdDev - noise_floor) × factor)
-offset            = clamp(min_offset + volatility_buffer, min_offset, cap_offset)
+volatility_buffer = max(0, (StdDev − noise_floor) × factor)
+offset_abs        = clamp(min_offset + volatility_buffer, min_offset, cap_offset)
+
+offset_out = +offset_abs   (negativer Offset: Aus)
+offset_out = −offset_abs   (negativer Offset: Ein)
 ```
 
-### Beispielwerte (min_offset=30, noise_floor=15, factor=1.5)
+### Beispielwerte (min=30, noise=15, factor=1.5)
 
-| Netz-Zustand | StdDev | Offset |
-|:------------|:------:|:------:|
-| Sehr ruhig | 5 W | 30 W *(Minimum)* |
-| Normal | 30 W | 53 W |
-| Unruhig | 80 W | 128 W |
-| Sehr unruhig | 160 W | 228 W |
-| Extrem | 250 W+ | 250 W *(Maximum)* |
+| Netz-Zustand | StdDev | Positiv | Negativ |
+|:------------|:------:|:-------:|:-------:|
+| Sehr ruhig | 5 W | +30 W | −30 W |
+| Normal | 30 W | +53 W | −53 W |
+| Unruhig | 80 W | +128 W | −128 W |
+| Sehr unruhig | 160 W | +228 W | −228 W |
+| Extrem | 250 W+ | +250 W | −250 W |
 
 ---
 
@@ -141,7 +144,8 @@ offset            = clamp(min_offset + volatility_buffer, min_offset, cap_offset
 | Offset bleibt auf Minimum | `sensor.solakon_grid_stddev_60s` prüfen — ggf. einige Minuten nach Ersteinrichtung warten |
 | Offset reagiert zu träge | Volatilitäts-Faktor erhöhen oder Rausch-Schwelle senken |
 | Offset zu aggressiv | Volatilitäts-Faktor oder maximalen Offset reduzieren |
-| `input_number` nimmt keinen Wert an | Min/Max-Bereich prüfen (0–500 W empfohlen) |
+| Negativer Wert wird nicht übernommen | `input_number`-Helfer: `min` auf `−500` setzen |
+| `input_number` nimmt keinen Wert an | Min/Max-Bereich prüfen |
 | Automation läuft nicht | Prüfen ob mindestens ein Ziel-Helfer (Zone 1/2/AC) konfiguriert ist |
 
 ---
@@ -152,19 +156,18 @@ offset            = clamp(min_offset + volatility_buffer, min_offset, cap_offset
 
 > 🇬🇧 English documentation. **[Deutsche Version oben ↑](#solakon-one--dynamischer-offset-volatilitäts-regler)**
 
-> Adds a self-adjusting offset to zero-feed-in control. The blueprint analyses grid fluctuations over the last 60 seconds and automatically increases the safety buffer when the grid is volatile — e.g. due to cycling loads like compressors or washing machines.
+> Adds a self-adjusting offset to zero-feed-in control. The blueprint analyses grid fluctuations over the last 60 seconds and automatically increases the safety buffer when the grid is volatile — e.g. due to cycling loads like compressors or washing machines. Each zone is individually configurable, including an optional negative offset (feed-in instead of draw).
 
 ## How It Works
 
-The blueprint shifts the PI controller's target upward:
+The blueprint shifts the PI controller's target:
 
 ```
-Target = 0 W + Offset
+Target = 0 W + Offset     (positive → grid draw buffer)
+Target = 0 W − Offset     (negative → slight feed-in)
 ```
 
-Without an offset, the controller regulates to 0 W. With cycling devices this causes constant feed-in/draw oscillation. The dynamic offset maintains a **grid draw buffer** large enough to absorb typical fluctuations.
-
-The standard deviation over 60 seconds estimates the required buffer size. **Importantly:** spikes intentionally count toward the StdDev — fast swings in both directions are exactly what the offset is meant to absorb. A new stable load level normalises the StdDev on its own within the next 60 seconds.
+The standard deviation over 60 seconds estimates the required buffer size. Spikes intentionally count toward the StdDev — fast swings in both directions are exactly what the offset is meant to absorb. A new stable load level normalises the StdDev on its own within the next 60 seconds.
 
 ---
 
@@ -188,8 +191,6 @@ The standard deviation over 60 seconds estimates the required buffer size. **Imp
 
 *Helpers → **Create statistic***
 
-> The statistics sensor reads directly from the raw sensor (e.g. `sensor.shelly3em_power`). No intermediate step required.
-
 | Field | Value |
 |-------|-------|
 | Name | `Solakon Grid StdDev 60s` |
@@ -206,59 +207,63 @@ The standard deviation over 60 seconds estimates the required buffer size. **Imp
 |-------|--------|--------|---------|
 | Name | `Solakon Offset Zone1` | `Solakon Offset Zone2` | `Solakon Offset Zone AC` |
 | Object ID | `solakon_offset_zone1` | `solakon_offset_zone2` | `solakon_offset_zone_ac` |
-| Min / Max | `0` / `500` | `0` / `500` | `0` / `500` |
+| Min | `0` *(or `−500` for negative offset)* | idem | idem |
+| Max | `500` | `500` | `500` |
 | Unit | `W` | `W` | `W` |
+
+> ⚠️ **Negative offset:** The `input_number` helper must have `min: −500` (or lower) to accept negative values. A helper with `min: 0` will silently discard negative values.
 
 ### Step 3 — Import Blueprint & Create Automation
 
 1. Copy blueprint file to `config/blueprints/automation/solakon/`
 2. *Settings → Automations → **Create blueprint automation***
 3. Select `Solakon ONE — Dynamischer Offset`
-4. Fill in required fields, adjust optional parameters as needed
+4. Fill in required fields, adjust optional parameters per zone as needed
 
 ---
 
 ## Blueprint Parameters
 
-### Required
+### Statistics Sensor (Required)
 
 | Parameter | Description |
 |-----------|-------------|
 | 📊 Statistics Sensor | `sensor.solakon_grid_stddev_60s` |
 
-### Target Helpers (at least one required)
+### Zone 1 / Zone 2 / Zone AC — individually configurable
 
-| Parameter | Description |
-|-----------|-------------|
-| 🎯 Target Helper Zone 1 | `input_number.solakon_offset_zone1` |
-| 🎯 Target Helper Zone 2 | `input_number.solakon_offset_zone2` |
-| 🎯 Target Helper Zone AC | `input_number.solakon_offset_zone_ac` |
-
-### Optional Parameters
+Each zone has its own section with identical parameter structure:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| 🎯 Target Helper | *(empty)* | `input_number` helper for the output value |
+| ↕️ Negative Offset | `Off` | On → offset is negated (target < 0 W) |
 | 📉 Minimum Offset | `30 W` | Base buffer during calm grid conditions |
 | 📈 Maximum Offset | `250 W` | Upper limit during volatile conditions |
-| 🔇 Noise Floor | `15 W` | StdDev below this = measurement noise |
+| 🔇 Noise Floor | `15 W` | StdDev below this = measurement noise, no increase |
 | 📊 Volatility Factor | `1.5` | Amplification above the noise floor |
 
-### Offset Formula
+---
+
+## Offset Formula & Direction
 
 ```
-volatility_buffer = max(0, (StdDev - noise_floor) × factor)
-offset            = clamp(min_offset + volatility_buffer, min_offset, cap_offset)
+volatility_buffer = max(0, (StdDev − noise_floor) × factor)
+offset_abs        = clamp(min_offset + volatility_buffer, min_offset, cap_offset)
+
+offset_out = +offset_abs   (negative offset: Off)
+offset_out = −offset_abs   (negative offset: On)
 ```
 
-### Example Values (min_offset=30, noise_floor=15, factor=1.5)
+### Example Values (min=30, noise=15, factor=1.5)
 
-| Grid State | StdDev | Offset |
-|:-----------|:------:|:------:|
-| Very calm | 5 W | 30 W *(minimum)* |
-| Normal | 30 W | 53 W |
-| Volatile | 80 W | 128 W |
-| Very volatile | 160 W | 228 W |
-| Extreme | 250 W+ | 250 W *(maximum)* |
+| Grid State | StdDev | Positive | Negative |
+|:-----------|:------:|:--------:|:--------:|
+| Very calm | 5 W | +30 W | −30 W |
+| Normal | 30 W | +53 W | −53 W |
+| Volatile | 80 W | +128 W | −128 W |
+| Very volatile | 160 W | +228 W | −228 W |
+| Extreme | 250 W+ | +250 W | −250 W |
 
 ---
 
@@ -269,5 +274,6 @@ offset            = clamp(min_offset + volatility_buffer, min_offset, cap_offset
 | Offset stays at minimum | Check `sensor.solakon_grid_stddev_60s` — may need a few minutes after first setup |
 | Offset too slow to react | Increase volatility factor or lower noise floor |
 | Offset too aggressive | Reduce volatility factor or maximum offset |
-| `input_number` rejects values | Check min/max range (0–500 W recommended) |
+| Negative value not accepted | Set `input_number` helper `min` to `−500` |
+| `input_number` rejects values | Check min/max range |
 | Automation does not run | Verify at least one target helper (Zone 1/2/AC) is configured |
