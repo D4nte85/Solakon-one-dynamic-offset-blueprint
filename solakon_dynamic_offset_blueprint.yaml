@@ -2,8 +2,8 @@ blueprint:
   name: Solakon ONE — Dynamischer Offset (Volatilitäts-Regler)
   description: |
     ### Dynamischer Nullpunkt-Offset / Dynamic Zero-Point Offset
-    Berechnet einen selbstanpassenden Offset aus der Netz-Volatilität und schreibt ihn in die Ziel-Helfer.
-    Calculates a self-adjusting offset from grid volatility and writes it to the target helpers.
+    Berechnet einen selbstanpassenden Offset aus der Netz-Volatilität — pro Zone einzeln konfigurierbar, optional mit negativem Offset (Einspeisung).
+    Calculates a self-adjusting offset from grid volatility — individually configurable per zone, optionally with negative offset (feed-in).
 
     **Erforderliche Helfer / Required helpers:**
     - `sensor.solakon_grid_stddev_60s`
@@ -13,13 +13,13 @@ blueprint:
   input:
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ABSCHNITT 1 / SECTION 1 — Sensoren & Helfer (Pflicht / Required)
+    # SENSOR — Statistik-Sensor (Pflicht / Required)
     # ══════════════════════════════════════════════════════════════════════════
-    sensoren_und_helfer:
-      name: "🔌 Sensoren & Helfer / Sensors & Helpers"
+    sensor_section:
+      name: "🔌 Statistik-Sensor / Statistics Sensor"
       description: >
-        Pflichtfelder — müssen vor der Blueprint-Einrichtung manuell angelegt werden (siehe README).
-        Required fields — must be created manually before setting up the blueprint (see README).
+        Pflichtfeld — muss vor der Blueprint-Einrichtung angelegt werden (siehe README).
+        Required field — must be created before setting up the blueprint (see README).
       collapsed: false
       input:
 
@@ -34,56 +34,46 @@ blueprint:
             entity:
               domain: sensor
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # ZONE 1
+    # ══════════════════════════════════════════════════════════════════════════
+    zone1_section:
+      name: "🎯 Zone 1"
+      description: >
+        Offset-Ausgabe für Zone 1. Mindestens eine Zone muss konfiguriert sein.
+        Offset output for Zone 1. At least one zone must be configured.
+      collapsed: false
+      input:
+
         offset_zone1_helper:
           name: 🎯 Ziel-Helper Zone 1 (Optional)
           description: >
-            Offset-Ausgabe für Zone 1. Mindestens einer der drei Helfer muss konfiguriert sein.
-            Offset output for Zone 1. At least one of the three helpers must be configured.
+            input_number-Helfer für den Offset-Ausgabewert.
+            Bei negativem Offset: min des Helfers auf −500 setzen.
+            input_number helper for the offset output value.
+            With negative offset: set the helper's min to −500.
             Standard / Default: `input_number.solakon_offset_zone1`
           default: {}
           selector:
             entity:
               domain: input_number
 
-        offset_zone2_helper:
-          name: 🎯 Ziel-Helper Zone 2 (Optional)
+        zone1_negative_offset:
+          name: "↕️ Negativer Offset / Negative Offset"
           description: >
-            Offset-Ausgabe für Zone 2. Mindestens einer der drei Helfer muss konfiguriert sein.
-            Offset output for Zone 2. At least one of the three helpers must be configured.
-            Standard / Default: `input_number.solakon_offset_zone2`
-          default: {}
+            Aus / Ein — Offset wird negativ ausgegeben (Regelziel < 0 W, leichte Einspeisung).
+            Off / On — offset output is negative (target < 0 W, slight feed-in).
+            Helfer-Min auf −500 setzen! / Set helper min to −500!
+          default: false
           selector:
-            entity:
-              domain: input_number
+            boolean:
 
-        offset_zone_ac_helper:
-          name: 🎯 Ziel-Helper Zone AC (Optional)
+        zone1_min_offset:
+          name: "📉 Minimaler Offset / Minimum Offset (W)"
           description: >
-            Offset-Ausgabe für AC-Laden. Mindestens einer der drei Helfer muss konfiguriert sein.
-            Offset output for AC charging. At least one of the three helpers must be configured.
-            Standard / Default: `input_number.solakon_offset_zone_ac`
-          default: {}
-          selector:
-            entity:
-              domain: input_number
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # ABSCHNITT 2 / SECTION 2 — Offset-Grenzen / Offset Limits
-    # ══════════════════════════════════════════════════════════════════════════
-    offset_grenzen:
-      name: "📏 Offset-Grenzen / Offset Limits"
-      description: >
-        Definiert den erlaubten Wertebereich des Offsets — unabhängig von der Netzunruhe.
-        Defines the allowed offset range — regardless of grid volatility.
-      collapsed: true
-      input:
-
-        min_offset:
-          name: 📉 Minimaler Offset / Minimum Offset (W)
-          description: >
-            Aktiv bei ruhigem Netz (StdDev unter Rausch-Schwelle). Sollte die Messungenauigkeit abdecken.
-            Active when grid is calm (StdDev below noise floor). Should cover measurement inaccuracy.
-            Shelly 3EM: ~5–10 W Rauschen / noise → 30–50 W sinnvoll / recommended.
+            Grundpuffer bei ruhigem Netz (StdDev unter Rausch-Schwelle).
+            Base buffer during calm grid conditions (StdDev below noise floor).
+            Shelly 3EM: 30–50 W empfohlen / recommended.
           default: 30
           selector:
             number:
@@ -91,11 +81,11 @@ blueprint:
               max: 200
               unit_of_measurement: W
 
-        cap_offset:
-          name: 📈 Maximaler Offset / Maximum Offset (W)
+        zone1_cap_offset:
+          name: "📈 Maximaler Offset / Maximum Offset (W)"
           description: >
-            Obere Grenze bei sehr unruhigem Netz. Schützt vor übermäßigem Netzbezug.
-            Upper limit for very volatile grids. Prevents excessive grid draw.
+            Obergrenze bei sehr unruhigem Netz. Schützt vor übermäßigem Netzbezug.
+            Upper limit during very volatile grid conditions. Prevents excessive grid draw.
             Empfehlung / Recommended: 250 W.
           default: 250
           selector:
@@ -104,23 +94,10 @@ blueprint:
               max: 1000
               unit_of_measurement: W
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # ABSCHNITT 3 / SECTION 3 — Volatilitäts-Regler / Volatility Controller
-    # ══════════════════════════════════════════════════════════════════════════
-    volatilitaet:
-      name: "📊 Volatilitäts-Regler / Volatility Controller"
-      description: >
-        Steuert die Empfindlichkeit des Offsets auf Netzschwankungen.
-        Controls how sensitively the offset reacts to grid fluctuations.
-
-        `offset = min_offset + max(0, (StdDev − noise_floor) × factor)`
-      collapsed: true
-      input:
-
-        noise_floor:
-          name: 🔇 Rausch-Schwelle / Noise Floor (W)
+        zone1_noise_floor:
+          name: "🔇 Rausch-Schwelle / Noise Floor (W)"
           description: >
-            StdDev unterhalb dieser Schwelle gilt als Messrauschen — löst keine Offset-Erhöhung aus.
+            StdDev unterhalb dieser Schwelle gilt als Messrauschen — keine Offset-Erhöhung.
             StdDev below this threshold is treated as measurement noise — no offset increase.
             Empfehlung / Recommended: 15 W (Shelly 3EM).
           default: 15
@@ -130,16 +107,185 @@ blueprint:
               max: 100
               unit_of_measurement: W
 
-        volatility_factor:
-          name: 📊 Volatilitäts-Faktor / Volatility Factor
+        zone1_volatility_factor:
+          name: "📊 Volatilitäts-Faktor / Volatility Factor"
           description: >
             Verstärkung der Netz-Volatilität auf den Offset.
             Amplification of grid volatility on the offset.
+            Beispiele / Examples (StdDev=80 W, noise=15 W):
+            0.5 → +33 W | 1.5 → +98 W | 3.0 → +195 W
+            Empfehlung / Recommended: 1.5.
+          default: 1.5
+          selector:
+            number:
+              min: 0.5
+              max: 5.0
+              step: 0.1
 
-            Beispiele / Examples (StdDev=80 W, noise_floor=15 W):
-            0.5 → +33 W | 1.5 → +98 W (Standard/Default) | 3.0 → +195 W
+    # ══════════════════════════════════════════════════════════════════════════
+    # ZONE 2
+    # ══════════════════════════════════════════════════════════════════════════
+    zone2_section:
+      name: "🎯 Zone 2"
+      description: >
+        Offset-Ausgabe für Zone 2. Mindestens eine Zone muss konfiguriert sein.
+        Offset output for Zone 2. At least one zone must be configured.
+      collapsed: true
+      input:
 
-            Höher / Higher = mehr Schutz, mehr Bezug / more protection, more draw.
+        offset_zone2_helper:
+          name: 🎯 Ziel-Helper Zone 2 (Optional)
+          description: >
+            input_number-Helfer für den Offset-Ausgabewert.
+            Bei negativem Offset: min des Helfers auf −500 setzen.
+            input_number helper for the offset output value.
+            With negative offset: set the helper's min to −500.
+            Standard / Default: `input_number.solakon_offset_zone2`
+          default: {}
+          selector:
+            entity:
+              domain: input_number
+
+        zone2_negative_offset:
+          name: "↕️ Negativer Offset / Negative Offset"
+          description: >
+            Aus / Ein — Offset wird negativ ausgegeben (Regelziel < 0 W, leichte Einspeisung).
+            Off / On — offset output is negative (target < 0 W, slight feed-in).
+            Helfer-Min auf −500 setzen! / Set helper min to −500!
+          default: false
+          selector:
+            boolean:
+
+        zone2_min_offset:
+          name: "📉 Minimaler Offset / Minimum Offset (W)"
+          description: >
+            Grundpuffer bei ruhigem Netz (StdDev unter Rausch-Schwelle).
+            Base buffer during calm grid conditions (StdDev below noise floor).
+            Shelly 3EM: 30–50 W empfohlen / recommended.
+          default: 30
+          selector:
+            number:
+              min: 0
+              max: 200
+              unit_of_measurement: W
+
+        zone2_cap_offset:
+          name: "📈 Maximaler Offset / Maximum Offset (W)"
+          description: >
+            Obergrenze bei sehr unruhigem Netz. Schützt vor übermäßigem Netzbezug.
+            Upper limit during very volatile grid conditions. Prevents excessive grid draw.
+            Empfehlung / Recommended: 250 W.
+          default: 250
+          selector:
+            number:
+              min: 50
+              max: 1000
+              unit_of_measurement: W
+
+        zone2_noise_floor:
+          name: "🔇 Rausch-Schwelle / Noise Floor (W)"
+          description: >
+            StdDev unterhalb dieser Schwelle gilt als Messrauschen — keine Offset-Erhöhung.
+            StdDev below this threshold is treated as measurement noise — no offset increase.
+            Empfehlung / Recommended: 15 W (Shelly 3EM).
+          default: 15
+          selector:
+            number:
+              min: 0
+              max: 100
+              unit_of_measurement: W
+
+        zone2_volatility_factor:
+          name: "📊 Volatilitäts-Faktor / Volatility Factor"
+          description: >
+            Verstärkung der Netz-Volatilität auf den Offset.
+            Amplification of grid volatility on the offset.
+            Empfehlung / Recommended: 1.5.
+          default: 1.5
+          selector:
+            number:
+              min: 0.5
+              max: 5.0
+              step: 0.1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ZONE AC
+    # ══════════════════════════════════════════════════════════════════════════
+    zone_ac_section:
+      name: "🎯 Zone AC"
+      description: >
+        Offset-Ausgabe für AC-Laden. Mindestens eine Zone muss konfiguriert sein.
+        Offset output for AC charging. At least one zone must be configured.
+      collapsed: true
+      input:
+
+        offset_zone_ac_helper:
+          name: 🎯 Ziel-Helper Zone AC (Optional)
+          description: >
+            input_number-Helfer für den Offset-Ausgabewert.
+            Bei negativem Offset: min des Helfers auf −500 setzen.
+            input_number helper for the offset output value.
+            With negative offset: set the helper's min to −500.
+            Standard / Default: `input_number.solakon_offset_zone_ac`
+          default: {}
+          selector:
+            entity:
+              domain: input_number
+
+        zone_ac_negative_offset:
+          name: "↕️ Negativer Offset / Negative Offset"
+          description: >
+            Aus / Ein — Offset wird negativ ausgegeben (Regelziel < 0 W, leichte Einspeisung).
+            Off / On — offset output is negative (target < 0 W, slight feed-in).
+            Helfer-Min auf −500 setzen! / Set helper min to −500!
+          default: false
+          selector:
+            boolean:
+
+        zone_ac_min_offset:
+          name: "📉 Minimaler Offset / Minimum Offset (W)"
+          description: >
+            Grundpuffer bei ruhigem Netz (StdDev unter Rausch-Schwelle).
+            Base buffer during calm grid conditions (StdDev below noise floor).
+            Shelly 3EM: 30–50 W empfohlen / recommended.
+          default: 30
+          selector:
+            number:
+              min: 0
+              max: 200
+              unit_of_measurement: W
+
+        zone_ac_cap_offset:
+          name: "📈 Maximaler Offset / Maximum Offset (W)"
+          description: >
+            Obergrenze bei sehr unruhigem Netz. Schützt vor übermäßigem Netzbezug.
+            Upper limit during very volatile grid conditions. Prevents excessive grid draw.
+            Empfehlung / Recommended: 250 W.
+          default: 250
+          selector:
+            number:
+              min: 50
+              max: 1000
+              unit_of_measurement: W
+
+        zone_ac_noise_floor:
+          name: "🔇 Rausch-Schwelle / Noise Floor (W)"
+          description: >
+            StdDev unterhalb dieser Schwelle gilt als Messrauschen — keine Offset-Erhöhung.
+            StdDev below this threshold is treated as measurement noise — no offset increase.
+            Empfehlung / Recommended: 15 W (Shelly 3EM).
+          default: 15
+          selector:
+            number:
+              min: 0
+              max: 100
+              unit_of_measurement: W
+
+        zone_ac_volatility_factor:
+          name: "📊 Volatilitäts-Faktor / Volatility Factor"
+          description: >
+            Verstärkung der Netz-Volatilität auf den Offset.
+            Amplification of grid volatility on the offset.
             Empfehlung / Recommended: 1.5.
           default: 1.5
           selector:
@@ -154,13 +300,28 @@ mode: single
 
 variables:
   stddev_sensor: !input stddev_sensor
-  min_offset: !input min_offset
-  cap_offset: !input cap_offset
-  noise_floor: !input noise_floor
-  volatility_factor: !input volatility_factor
+  # Zone 1
   offset_zone1_entity: !input offset_zone1_helper
+  zone1_negative: !input zone1_negative_offset
+  zone1_min: !input zone1_min_offset
+  zone1_cap: !input zone1_cap_offset
+  zone1_noise: !input zone1_noise_floor
+  zone1_factor: !input zone1_volatility_factor
+  # Zone 2
   offset_zone2_entity: !input offset_zone2_helper
+  zone2_negative: !input zone2_negative_offset
+  zone2_min: !input zone2_min_offset
+  zone2_cap: !input zone2_cap_offset
+  zone2_noise: !input zone2_noise_floor
+  zone2_factor: !input zone2_volatility_factor
+  # Zone AC
   offset_zone_ac_entity: !input offset_zone_ac_helper
+  zone_ac_negative: !input zone_ac_negative_offset
+  zone_ac_min: !input zone_ac_min_offset
+  zone_ac_cap: !input zone_ac_cap_offset
+  zone_ac_noise: !input zone_ac_noise_floor
+  zone_ac_factor: !input zone_ac_volatility_factor
+  # Gültigkeit / Validity
   offset_zone1_valid: >
     {{ offset_zone1_entity is string and offset_zone1_entity | length > 0 }}
   offset_zone2_valid: >
@@ -176,16 +337,55 @@ actions:
   - condition: template
     value_template: "{{ offset_zone1_valid or offset_zone2_valid or offset_zone_ac_valid }}"
 
-  # ── Offset berechnen / Calculate offset ───────────────────────────────────
+  # ── Offsets berechnen / Calculate offsets ─────────────────────────────────
+  # Formel / Formula:
+  #   volatility_buffer = max(0, (StdDev − noise_floor) × factor)
+  #   offset            = clamp(min_offset + volatility_buffer, min_offset, cap_offset)
+  #   Bei negativem Offset / With negative offset: result × −1
   - variables:
-      dynamic_offset: >
-        {% set std_dev = states(stddev_sensor) | float(-1) %}
-        {% if std_dev < 0 %}
-          {{ min_offset | int(30) }}
+      dynamic_offset_zone1: >
+        {% set s = states(stddev_sensor) | float(-1) %}
+        {% set m = zone1_min | int(30) %}
+        {% set c = zone1_cap | int(250) %}
+        {% set n = zone1_noise | float(15) %}
+        {% set f = zone1_factor | float(1.5) %}
+        {% set neg = zone1_negative | bool(false) %}
+        {% if s < 0 %}
+          {{ m | int * (-1 if neg else 1) }}
         {% else %}
-          {% set volatility_buffer = [0, (std_dev - noise_floor) * volatility_factor] | max %}
-          {% set result = (min_offset + volatility_buffer) | round(0) | int %}
-          {{ [[min_offset | int(30), result] | max, cap_offset | int(250)] | min }}
+          {% set buf = [0, (s - n) * f] | max %}
+          {% set result = [[m, (m + buf) | round(0) | int] | max, c] | min %}
+          {{ result | int * (-1 if neg else 1) }}
+        {% endif %}
+
+      dynamic_offset_zone2: >
+        {% set s = states(stddev_sensor) | float(-1) %}
+        {% set m = zone2_min | int(30) %}
+        {% set c = zone2_cap | int(250) %}
+        {% set n = zone2_noise | float(15) %}
+        {% set f = zone2_factor | float(1.5) %}
+        {% set neg = zone2_negative | bool(false) %}
+        {% if s < 0 %}
+          {{ m | int * (-1 if neg else 1) }}
+        {% else %}
+          {% set buf = [0, (s - n) * f] | max %}
+          {% set result = [[m, (m + buf) | round(0) | int] | max, c] | min %}
+          {{ result | int * (-1 if neg else 1) }}
+        {% endif %}
+
+      dynamic_offset_zone_ac: >
+        {% set s = states(stddev_sensor) | float(-1) %}
+        {% set m = zone_ac_min | int(30) %}
+        {% set c = zone_ac_cap | int(250) %}
+        {% set n = zone_ac_noise | float(15) %}
+        {% set f = zone_ac_factor | float(1.5) %}
+        {% set neg = zone_ac_negative | bool(false) %}
+        {% if s < 0 %}
+          {{ m | int * (-1 if neg else 1) }}
+        {% else %}
+          {% set buf = [0, (s - n) * f] | max %}
+          {% set result = [[m, (m + buf) | round(0) | int] | max, c] | min %}
+          {{ result | int * (-1 if neg else 1) }}
         {% endif %}
 
   # ── Offset in Zonen schreiben / Write offset to zones ─────────────────────
@@ -198,7 +398,8 @@ actions:
             target:
               entity_id: "{{ offset_zone1_entity }}"
             data:
-              value: "{{ dynamic_offset }}"
+              value: "{{ dynamic_offset_zone1 }}"
+
   - choose:
       - conditions:
           - condition: template
@@ -208,7 +409,8 @@ actions:
             target:
               entity_id: "{{ offset_zone2_entity }}"
             data:
-              value: "{{ dynamic_offset }}"
+              value: "{{ dynamic_offset_zone2 }}"
+
   - choose:
       - conditions:
           - condition: template
@@ -218,4 +420,4 @@ actions:
             target:
               entity_id: "{{ offset_zone_ac_entity }}"
             data:
-              value: "{{ dynamic_offset }}"
+              value: "{{ dynamic_offset_zone_ac }}"
