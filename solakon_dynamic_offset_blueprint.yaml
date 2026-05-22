@@ -294,8 +294,8 @@ blueprint:
               max: 5.0
               step: 0.1
 
-# Single: StdDev-Updates während laufender Ausführung werden verworfen — kein Datenverlust, da StdDev träge ist.
-# Single: StdDev updates during execution are discarded — no data loss since StdDev changes slowly.
+# Single: Gleichzeitige Ausführungen werden verworfen — kein Datenverlust, da StdDev ein 60s-Mittelwert ist.
+# Single: Concurrent executions are discarded — no data loss since StdDev is a 60 s rolling average.
 mode: single
 
 variables:
@@ -330,8 +330,14 @@ variables:
     {{ offset_zone_ac_entity is string and offset_zone_ac_entity | length > 0 }}
 
 triggers:
-  - trigger: state
-    entity_id: !input stddev_sensor
+  # Alle 30 s auswerten — StdDev ist ein 60s-Mittelwert und ändert sich träge.
+  # Trigger auf state des stddev_sensor würde bei 1s-Update-Rate des Netzsensors
+  # ~86.400×/Tag auslösen und die HA-Datenbank stark belasten.
+  # Every 30 s — StdDev is a 60 s rolling average and changes slowly.
+  # A state trigger on stddev_sensor would fire ~86,400×/day at 1 s grid-sensor
+  # update rate, causing excessive HA database growth.
+  - trigger: time_pattern
+    seconds: "/30"
 
 actions:
   - condition: template
