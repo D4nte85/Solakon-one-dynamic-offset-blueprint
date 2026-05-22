@@ -340,9 +340,6 @@ triggers:
     seconds: "/30"
 
 actions:
-  - condition: template
-    value_template: "{{ offset_zone1_valid or offset_zone2_valid or offset_zone_ac_valid }}"
-
   # ── Offsets berechnen / Calculate offsets ─────────────────────────────────
   # Formel / Formula:
   #   volatility_buffer = max(0, (StdDev − noise_floor) × factor)
@@ -395,10 +392,16 @@ actions:
         {% endif %}
 
   # ── Offset in Zonen schreiben / Write offset to zones ─────────────────────
+  # Nur schreiben wenn Zone konfiguriert UND Wert geändert — vermeidet unnötige
+  # DB-Einträge wenn StdDev stabil ist und sich der Offset nicht ändert.
+  # Only write when zone configured AND value changed — avoids unnecessary
+  # DB entries when StdDev is stable and the offset does not change.
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ offset_zone1_valid }}"
+            value_template: >
+              {{ offset_zone1_valid and
+                 (states(offset_zone1_entity) | int(-999)) != (dynamic_offset_zone1 | int) }}
         sequence:
           - action: input_number.set_value
             target:
@@ -409,7 +412,9 @@ actions:
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ offset_zone2_valid }}"
+            value_template: >
+              {{ offset_zone2_valid and
+                 (states(offset_zone2_entity) | int(-999)) != (dynamic_offset_zone2 | int) }}
         sequence:
           - action: input_number.set_value
             target:
@@ -420,7 +425,9 @@ actions:
   - choose:
       - conditions:
           - condition: template
-            value_template: "{{ offset_zone_ac_valid }}"
+            value_template: >
+              {{ offset_zone_ac_valid and
+                 (states(offset_zone_ac_entity) | int(-999)) != (dynamic_offset_zone_ac | int) }}
         sequence:
           - action: input_number.set_value
             target:
