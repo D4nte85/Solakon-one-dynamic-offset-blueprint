@@ -3,6 +3,13 @@
 Alle nennenswerten Änderungen am Solakon-Dynamic-Offset-Blueprint.
 Das Blueprint hat kein Versionsschema — Einträge sind nach Datum gruppiert.
 
+## 2026-07-31
+- Entladeschutz für Zone 1 ergänzt: negativer Offset (Einspeisung) wird zu positivem Bezugspuffer, wenn der Akku entlädt (Ausgangsleistung ≥ PV) — verhindert Ausspeisen von Batterieenergie ins Netz. Kein zusätzliches SoC-Gate, da die SoC-Zonenlogik bereits vom Haupt-Blueprint (Nulleinspeisung) übernommen wird
+- Nur Zone 1: Zone 2 und AC erzwingen im Haupt-Blueprint 0 A Entladestrom und deckeln den Ausgang auf PV — dort ist ein Entladeschutz wirkungslos
+- Neue optionale Sensor-Sektion (PV-Leistung, Ausgangsleistung) mit Defaults der Solakon-ONE-Entitäten
+- Zone 1: Schalter „Entladeschutz“ und „Entlade-Hysterese“ (Standard 50 W, verhindert Vorzeichen-Flattern am Überschuss-Übergang)
+- Vollständig abwärtskompatibel: bei ausgeschaltetem Entladeschutz unverändertes Verhalten; Sensor-Ausfall greift fail-safe (Schutz)
+
 ## 2026-05-22
 - DB-Wachstum behoben: State-Trigger durch `time_pattern` (alle 30 s) ersetzt
 - Choose-Bedingungen verfeinert: redundanter Guard entfernt, Prüfung auf geänderten Wert ergänzt

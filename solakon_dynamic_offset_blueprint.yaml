@@ -35,6 +35,45 @@ blueprint:
               domain: sensor
 
     # ══════════════════════════════════════════════════════════════════════════
+    # ENTLADESCHUTZ — Sensoren (Optional / Optional)
+    # ══════════════════════════════════════════════════════════════════════════
+    discharge_section:
+      name: "🔋 Entladeschutz-Sensoren / Discharge-Protection Sensors"
+      description: >
+        Nur nötig, wenn „Entladeschutz“ in Zone 1 aktiviert ist. Verhindert, dass ein
+        negativer Offset Batterieenergie ins Netz einspeist, während der Akku entlädt.
+        Nur Zone 1 entlädt aktiv — Zone 2 und AC erzwingen im Haupt-Blueprint 0 A Entladestrom.
+        Only needed if "Discharge protection" is enabled in Zone 1. Prevents a negative
+        offset from feeding battery energy into the grid while the battery is discharging.
+        Only Zone 1 actively discharges — Zone 2 and AC force 0 A discharge current in the main blueprint.
+      collapsed: true
+      input:
+
+        pv_power_sensor:
+          name: ☀️ PV-Leistung / PV Power
+          description: >
+            Aktuelle PV-Gesamterzeugung (W). Vergleich mit der Ausgangsleistung erkennt Überschuss.
+            Current total PV generation (W). Compared against output power to detect surplus.
+            Standard / Default: `sensor.solakon_one_pv_leistung`
+          default: sensor.solakon_one_pv_leistung
+          selector:
+            entity:
+              domain: sensor
+
+        actual_power_sensor:
+          name: ⚡ Ausgangsleistung / Output Power
+          description: >
+            Tatsächliche AC-Ausgangsleistung des Wechselrichters (W). Liegt sie über der
+            PV-Leistung, kommt die Differenz aus dem Akku (Entladung).
+            Actual AC output power of the inverter (W). If it exceeds PV power, the
+            difference comes from the battery (discharging).
+            Standard / Default: `sensor.solakon_one_leistung`
+          default: sensor.solakon_one_leistung
+          selector:
+            entity:
+              domain: sensor
+
+    # ══════════════════════════════════════════════════════════════════════════
     # ZONE 1
     # ══════════════════════════════════════════════════════════════════════════
     zone1_section:
@@ -121,6 +160,34 @@ blueprint:
               min: 0.5
               max: 5.0
               step: 0.1
+
+        zone1_discharge_protection:
+          name: "🛡️ Entladeschutz / Discharge Protection"
+          description: >
+            Aus / Ein — nur wirksam bei aktivem negativem Offset. Ein: Einspeisung wird
+            unterdrückt (Offset wird positiv), sobald der Akku entlädt (Ausgang ≥ PV).
+            Benötigt die Entladeschutz-Sensoren. Die SoC-Zonenlogik übernimmt das Haupt-Blueprint.
+            Off / On — only effective with negative offset enabled. On: feed-in is suppressed
+            (offset turns positive) as soon as the battery discharges (output ≥ PV).
+            Requires the discharge-protection sensors. SoC zone logic is handled by the main blueprint.
+          default: false
+          selector:
+            boolean:
+
+        zone1_discharge_hysteresis:
+          name: "↔️ Entlade-Hysterese / Discharge Hysteresis (W)"
+          description: >
+            Sicherheitsmarge auf den Vergleich PV > Ausgang. PV muss die Ausgangsleistung um
+            diesen Wert übersteigen, damit Überschuss als echt gilt — verhindert Vorzeichen-Flattern.
+            Safety margin on the PV > output comparison. PV must exceed output power by this
+            amount for surplus to count as real — prevents sign chatter.
+            Empfehlung / Recommended: 50 W.
+          default: 50
+          selector:
+            number:
+              min: 0
+              max: 500
+              unit_of_measurement: W
 
     # ══════════════════════════════════════════════════════════════════════════
     # ZONE 2
@@ -300,6 +367,9 @@ mode: single
 
 variables:
   stddev_sensor: !input stddev_sensor
+  # Entladeschutz-Sensoren / Discharge-protection sensors
+  pv_power_sensor: !input pv_power_sensor
+  actual_power_sensor: !input actual_power_sensor
   # Zone 1
   offset_zone1_entity: !input offset_zone1_helper
   zone1_negative: !input zone1_negative_offset
@@ -307,6 +377,8 @@ variables:
   zone1_cap: !input zone1_cap_offset
   zone1_noise: !input zone1_noise_floor
   zone1_factor: !input zone1_volatility_factor
+  zone1_discharge_protect: !input zone1_discharge_protection
+  zone1_hysteresis: !input zone1_discharge_hysteresis
   # Zone 2
   offset_zone2_entity: !input offset_zone2_helper
   zone2_negative: !input zone2_negative_offset
@@ -321,6 +393,14 @@ variables:
   zone_ac_cap: !input zone_ac_cap_offset
   zone_ac_noise: !input zone_ac_noise_floor
   zone_ac_factor: !input zone_ac_volatility_factor
+  # Entladeschutz-Entscheidung: Einspeisung nur bei echtem PV-Überschuss (PV > Ausgang +
+  # Hysterese). Die SoC-Zonenlogik übernimmt bereits das Haupt-Blueprint — hier kein
+  # zusätzliches SoC-Gate. Sensor ungültig (-1) → Schutz greift (kein Feed-in).
+  # Discharge-protection decision: feed-in only on genuine PV surplus (PV > output +
+  # hysteresis). SoC zone logic is already handled by the main blueprint — no extra SoC
+  # gate here. Sensor invalid (-1) → protect (no feed-in).
+  dp_pv: "{{ states(pv_power_sensor) | float(-1) }}"
+  dp_out: "{{ states(actual_power_sensor) | float(-1) }}"
   # Gültigkeit / Validity
   offset_zone1_valid: >
     {{ offset_zone1_entity is string and offset_zone1_entity | length > 0 }}
@@ -353,12 +433,17 @@ actions:
         {% set n = zone1_noise | float(15) %}
         {% set f = zone1_factor | float(1.5) %}
         {% set neg = zone1_negative | bool(false) %}
+        {% set dp = zone1_discharge_protect | bool(false) %}
+        {% set hy = zone1_hysteresis | float(50) %}
+        {% set sensors_ok = dp_pv >= 0 and dp_out >= 0 %}
+        {% set feed_ok = sensors_ok and dp_pv > (dp_out + hy) %}
+        {% set sign = -1 if (neg and (not dp or feed_ok)) else 1 %}
         {% if s < 0 %}
-          {{ m | int * (-1 if neg else 1) }}
+          {{ m | int * sign }}
         {% else %}
           {% set buf = [0, (s - n) * f] | max %}
           {% set result = [[m, (m + buf) | round(0) | int] | max, c] | min %}
-          {{ result | int * (-1 if neg else 1) }}
+          {{ result | int * sign }}
         {% endif %}
 
       dynamic_offset_zone2: >
