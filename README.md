@@ -113,7 +113,7 @@ Jede Zone hat einen eigenen Abschnitt mit gleicher Basis-Parameterstruktur (Entl
 | 🔇 Rausch-Schwelle | `15 W` | StdDev darunter = Grundrauschen, kein Anstieg |
 | 📊 Volatilitäts-Faktor | `1.5` | Verstärkung oberhalb der Rausch-Schwelle |
 | 🛡️ Entladeschutz *(nur Zone 1)* | `Aus` | Ein → Einspeisung nur bei PV-Überschuss (siehe unten) |
-| ↔️ Entlade-Hysterese *(nur Zone 1)* | `50 W` | Marge auf PV > Ausgang, verhindert Vorzeichen-Flattern |
+| ↔️ Entlade-Hysterese *(nur Zone 1)* | `100 W` | Marge auf PV > Hauslast, verhindert Vorzeichen-Flattern |
 
 ---
 
@@ -141,27 +141,32 @@ offset_out = −offset_abs   (negativer Offset: Ein)
 
 ## Entladeschutz (Optional)
 
-Ein negativer Offset erzwingt eine leichte **Einspeisung** — der PI-Regler hält das Netz konstant unter 0 W. Solange PV-Überschuss vorhanden ist, ist das gewollt (überschüssige PV statt Abregelung ins Netz). Sobald aber der Akku entlädt (Ausgangsleistung > PV), speist dieser konstante Ziel-Export **Batterieenergie ins Netz** — verschenkte kWh und unnötige Ladezyklen.
+Ein negativer Offset erzwingt eine leichte **Einspeisung** — der PI-Regler hält das Netz konstant unter 0 W. Solange PV-Überschuss vorhanden ist, ist das gewollt (überschüssige PV statt Abregelung ins Netz). Sobald aber der Akku entlädt (Hauslast > PV), speist dieser konstante Ziel-Export **Batterieenergie ins Netz** — verschenkte kWh und unnötige Ladezyklen.
 
 Der Entladeschutz kehrt in genau dieser Situation das Vorzeichen um: statt Einspeisung ein kleiner **Netzbezugspuffer** (positiver Offset).
 
 **Einspeisung (negativer Offset) bleibt nur aktiv, solange echter PV-Überschuss vorliegt:**
 
 ```
-PV-Leistung > Ausgangsleistung + Hysterese     (echter PV-Überschuss)
+PV-Leistung > Hauslast (geglättet) + Hysterese     (echter PV-Überschuss)
+Hauslast = Ausgangsleistung + Netzleistung
 ```
 
-Andernfalls — Akku entlädt (Ausgang ≥ PV) **oder** ein Sensor ist nicht verfügbar — wird der Offset positiv (Schutz hat Vorrang, kein Ausspeisen aus dem Akku).
+Andernfalls — Hauslast erreicht/übersteigt PV **oder** ein Sensor ist nicht verfügbar — wird der Offset positiv (Schutz hat Vorrang, kein Ausspeisen aus dem Akku).
 
-| Zustand | PV vs. Ausgang | Offset (neg. konfiguriert) |
-|:--------|:--------------:|:--------------------------:|
-| PV-Überschuss | PV > Ausgang + Hyst. | **−X** (Einspeisung) |
-| Akku entlädt | Ausgang ≥ PV | **+X** (Bezugspuffer) |
-| Sensor nicht verfügbar | — | **+X** (Schutz) |
+⚠️ **Warum Hauslast statt Ausgangsleistung allein?** Eine erste Version verglich PV direkt mit der Ausgangsleistung des Wechselrichters. Das erzeugte einen sich selbst erregenden Vorzeichen-Flatterer: Ausgang steigt → „Entladung“ erkannt → Offset kippt positiv → PI-Regler senkt den Ausgang → „Überschuss“ erkannt → Offset kippt negativ → Ausgang steigt wieder … Alle 30 s zwischen −250 W und +250 W, beobachtet live in Produktion. Die Ausgangsleistung wird nämlich vom PI-Regler selbst gesteuert — ein Vergleich damit vergleicht den Regler mit sich selbst.
+
+Hauslast = Ausgangsleistung + Netzleistung ist dagegen eine physikalische Invariante (Energieerhaltung an der Hausanschlussstelle) und bleibt exakt gleich, egal wie der PI-Regler intern zwischen Ausgang und Netz aufteilt. Zusätzlich wird die Hauslast per EMA geglättet (Standard α = 0.2, ≈ 90 s Zeitkonstante bei 30-s-Zyklus), um kurze Lastspitzen (z. B. Wasserkocher) zu ignorieren.
+
+| Zustand | PV vs. Hauslast | Offset (neg. konfiguriert) |
+|:--------|:----------------:|:--------------------------:|
+| PV-Überschuss | PV > Last + Hyst. | **−X** (Einspeisung) |
+| Akku entlädt | Last ≥ PV | **+X** (Bezugspuffer) |
+| Sensor nicht verfügbar | — | **+X** (Schutz), EMA eingefroren |
 
 > **Nur Zone 1.** Im Haupt-Blueprint (Nulleinspeisung) entlädt nur Zone 1 aktiv den Akku; Zone 2 und Zone AC erzwingen 0 A Entladestrom und deckeln den Ausgang auf die PV-Leistung — dort kann per Definition keine Batterieenergie ins Netz fließen, ein Entladeschutz wäre wirkungslos.
 >
-> Benötigt die zwei **Entladeschutz-Sensoren** (PV-Leistung, Ausgangsleistung). Die SoC-Zonenlogik übernimmt bereits das Haupt-Blueprint — hier ist kein zusätzliches SoC-Gate nötig. Ist der Entladeschutz `Aus`, verhält sich Zone 1 exakt wie bisher — die Sensoren werden dann nicht ausgewertet.
+> Benötigt die **Entladeschutz-Sensoren** (PV-Leistung, Ausgangsleistung, rohe Netzleistung) sowie einen **`input_number`-Helfer** zum Speichern der geglätteten Hauslast zwischen den Zyklen. Die SoC-Zonenlogik übernimmt bereits das Haupt-Blueprint — hier ist kein zusätzliches SoC-Gate nötig. Ist der Entladeschutz `Aus`, verhält sich Zone 1 exakt wie bisher — die Sensoren werden dann nicht ausgewertet.
 
 ---
 
@@ -271,7 +276,7 @@ Each zone has its own section with the same base parameter structure (discharge 
 | 🔇 Noise Floor | `15 W` | StdDev below this = measurement noise, no increase |
 | 📊 Volatility Factor | `1.5` | Amplification above the noise floor |
 | 🛡️ Discharge Protection *(Zone 1 only)* | `Off` | On → feed-in only on PV surplus (see below) |
-| ↔️ Discharge Hysteresis *(Zone 1 only)* | `50 W` | Margin on PV > output, prevents sign chatter |
+| ↔️ Discharge Hysteresis *(Zone 1 only)* | `100 W` | Margin on PV > house load, prevents sign chatter |
 
 ---
 
@@ -299,27 +304,32 @@ offset_out = −offset_abs   (negative offset: On)
 
 ## Discharge Protection (Optional)
 
-A negative offset forces a slight **feed-in** — the PI controller keeps the grid constantly below 0 W. While PV surplus exists this is intended (dump excess PV instead of curtailing). But once the battery discharges (output power > PV), that constant export target pushes **battery energy into the grid** — wasted kWh and needless charge cycles.
+A negative offset forces a slight **feed-in** — the PI controller keeps the grid constantly below 0 W. While PV surplus exists this is intended (dump excess PV instead of curtailing). But once the battery discharges (house load > PV), that constant export target pushes **battery energy into the grid** — wasted kWh and needless charge cycles.
 
 Discharge protection flips the sign in exactly that situation: instead of feed-in, a small **grid-draw buffer** (positive offset).
 
 **Feed-in (negative offset) stays active only while genuine PV surplus exists:**
 
 ```
-PV power > output power + hysteresis     (genuine PV surplus)
+PV power > house load (smoothed) + hysteresis     (genuine PV surplus)
+house load = output power + grid power
 ```
 
-Otherwise — battery discharging (output ≥ PV) **or** a sensor is unavailable — the offset turns positive (protection takes priority, no export from the battery).
+Otherwise — house load reaches/exceeds PV **or** a sensor is unavailable — the offset turns positive (protection takes priority, no export from the battery).
 
-| State | PV vs. output | Offset (neg. configured) |
-|:------|:-------------:|:------------------------:|
-| PV surplus | PV > output + hyst. | **−X** (feed-in) |
-| Battery discharging | output ≥ PV | **+X** (draw buffer) |
-| Sensor unavailable | — | **+X** (protected) |
+⚠️ **Why house load instead of output alone?** An earlier version compared PV directly against the inverter's output power. That created a self-exciting sign-chatter loop: output rises → "discharging" detected → offset flips positive → the PI controller lowers output → "surplus" detected → offset flips negative → output rises again … Every 30 s between −250 W and +250 W, observed live in production. Output power is controlled by the PI loop itself — comparing against it compares the controller to itself.
+
+House load = output + grid is a physical invariant instead (energy conservation at the grid connection point) and stays exactly the same no matter how the PI controller internally splits output vs. grid. House load is additionally EMA-smoothed (default α = 0.2, ≈ 90 s time constant at a 30 s cycle) to ride out short load spikes (e.g. a kettle).
+
+| State | PV vs. house load | Offset (neg. configured) |
+|:------|:------------------:|:------------------------:|
+| PV surplus | PV > load + hyst. | **−X** (feed-in) |
+| Battery discharging | load ≥ PV | **+X** (draw buffer) |
+| Sensor unavailable | — | **+X** (protected), EMA frozen |
 
 > **Zone 1 only.** In the main blueprint (zero-feed-in) only Zone 1 actively discharges the battery; Zone 2 and Zone AC force 0 A discharge current and cap output at PV power — by definition no battery energy can reach the grid there, so discharge protection would have no effect.
 >
-> Requires the two **discharge-protection sensors** (PV power, output power). SoC zone logic is already handled by the main blueprint — no extra SoC gate is needed here. If discharge protection is `Off`, Zone 1 behaves exactly as before — the sensors are not evaluated.
+> Requires the **discharge-protection sensors** (PV power, output power, raw grid power) plus an **`input_number` helper** to persist the smoothed house load between cycles. SoC zone logic is already handled by the main blueprint — no extra SoC gate is needed here. If discharge protection is `Off`, Zone 1 behaves exactly as before — the sensors are not evaluated.
 
 ---
 
