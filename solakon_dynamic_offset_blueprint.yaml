@@ -101,35 +101,6 @@ blueprint:
               domain: sensor
               device_class: power
 
-        ema_load_helper:
-          name: 🧮 Last-EMA-Speicher / Load EMA Storage (input_number — ERFORDERLICH bei Entladeschutz)
-          description: >
-            input_number-Helfer zum Speichern der geglätteten Hauslast zwischen den 30s-Zyklen.
-            Empfehlung: Min −2000, Max 5000, Step 1, Start 0.
-            input_number helper to persist the smoothed house load between 30 s cycles.
-            Recommended: Min −2000, Max 5000, Step 1, Initial 0.
-          default: {}
-          selector:
-            entity:
-              domain: input_number
-
-        load_smoothing_factor:
-          name: "🧮 Lastglättung α / Load Smoothing Factor (α)"
-          description: >
-            EMA-Glättungsfaktor für die Hauslast. Kleiner = glatter, aber träger;
-            größer = reaktionsschneller, aber empfindlicher für kurze Lastspitzen
-            (z.B. Wasserkocher). Bei 30s-Zyklus entspricht 0.2 ≈ 90s Zeitkonstante.
-            EMA smoothing factor for the house load. Smaller = smoother but slower;
-            larger = more responsive but more sensitive to short load spikes
-            (e.g. a kettle). At a 30 s cycle, 0.2 ≈ a 90 s time constant.
-            Empfehlung / Recommended: 0.2.
-          default: 0.2
-          selector:
-            number:
-              min: 0.05
-              max: 0.9
-              step: 0.05
-
     # ══════════════════════════════════════════════════════════════════════════
     # ZONE 1
     # ══════════════════════════════════════════════════════════════════════════
@@ -222,11 +193,11 @@ blueprint:
           name: "🛡️ Entladeschutz / Discharge Protection"
           description: >
             Aus / Ein — nur wirksam bei aktivem negativem Offset. Ein: Einspeisung wird
-            unterdrückt (Offset wird positiv), sobald die (geglättete) Hauslast die PV-Leistung
+            unterdrückt (Offset wird positiv), sobald die Hauslast die PV-Leistung
             erreicht oder übersteigt. Benötigt die Entladeschutz-Sensoren.
             Die SoC-Zonenlogik übernimmt das Haupt-Blueprint.
             Off / On — only effective with negative offset enabled. On: feed-in is suppressed
-            (offset turns positive) as soon as the (smoothed) house load reaches or exceeds
+            (offset turns positive) as soon as the house load reaches or exceeds
             PV power. Requires the discharge-protection sensors.
             SoC zone logic is handled by the main blueprint.
           default: false
@@ -236,9 +207,9 @@ blueprint:
         zone1_discharge_hysteresis:
           name: "↔️ Entlade-Hysterese / Discharge Hysteresis (W)"
           description: >
-            Sicherheitsmarge auf den Vergleich PV > Hauslast. PV muss die geglättete Hauslast
+            Sicherheitsmarge auf den Vergleich PV > Hauslast. PV muss die Hauslast
             um diesen Wert übersteigen, damit Überschuss als echt gilt.
-            Safety margin on the PV > house-load comparison. PV must exceed the smoothed
+            Safety margin on the PV > house-load comparison. PV must exceed the
             house load by this amount for surplus to count as real.
             Empfehlung / Recommended: 100 W.
           default: 100
@@ -430,8 +401,6 @@ variables:
   pv_power_sensor: !input pv_power_sensor
   actual_power_sensor: !input actual_power_sensor
   grid_power_sensor: !input grid_power_sensor
-  ema_load_entity: !input ema_load_helper
-  load_alpha_input: !input load_smoothing_factor
   # Zone 1
   offset_zone1_entity: !input offset_zone1_helper
   zone1_negative: !input zone1_negative_offset
@@ -457,12 +426,10 @@ variables:
   zone_ac_factor: !input zone_ac_volatility_factor
   # Entladeschutz-Entscheidung: Hauslast (Ausgang + Netz) statt Ausgang allein — siehe
   # Erläuterung in der Entladeschutz-Sensoren-Sektion oben (verhindert selbst erregtes
-  # Vorzeichen-Flattern). Zusätzlich EMA-geglättet, um kurze Lastspitzen zu ignorieren.
-  # Sensor ungültig → Schutz greift (kein Feed-in), EMA wird eingefroren.
+  # Vorzeichen-Flattern). Sensor ungültig → Schutz greift (kein Feed-in).
   # Discharge-protection decision: house load (output + grid) instead of output alone —
   # see explanation in the discharge-protection sensors section above (prevents
-  # self-exciting sign chatter). Additionally EMA-smoothed to ride out short load spikes.
-  # Sensor invalid → protect (no feed-in), EMA is frozen.
+  # self-exciting sign chatter). Sensor invalid → protect (no feed-in).
   dp_pv_state: "{{ states(pv_power_sensor) }}"
   dp_out_state: "{{ states(actual_power_sensor) }}"
   dp_grid_state: "{{ states(grid_power_sensor) }}"
@@ -470,13 +437,8 @@ variables:
     {{ dp_pv_state not in ['unknown', 'unavailable', 'none', ''] and
        dp_out_state not in ['unknown', 'unavailable', 'none', ''] and
        dp_grid_state not in ['unknown', 'unavailable', 'none', ''] }}
-  dp_ema_valid: "{{ ema_load_entity is string and ema_load_entity | length > 0 }}"
   dp_pv: "{{ dp_pv_state | float(0) }}"
-  dp_load_now: "{{ (dp_out_state | float(0)) + (dp_grid_state | float(0)) }}"
-  dp_ema_old: "{{ states(ema_load_entity) | float(dp_load_now) if dp_ema_valid else dp_load_now }}"
-  dp_alpha: "{{ load_alpha_input | float(0.2) }}"
-  dp_ema_new: >
-    {{ (dp_ema_old + dp_alpha * (dp_load_now - dp_ema_old)) if dp_sensors_ok else dp_ema_old }}
+  dp_load: "{{ (dp_out_state | float(0)) + (dp_grid_state | float(0)) }}"
   # Gültigkeit / Validity
   offset_zone1_valid: >
     {{ offset_zone1_entity is string and offset_zone1_entity | length > 0 }}
@@ -511,7 +473,7 @@ actions:
         {% set neg = zone1_negative | bool(false) %}
         {% set dp = zone1_discharge_protect | bool(false) %}
         {% set hy = zone1_hysteresis | float(100) %}
-        {% set feed_ok = dp_sensors_ok and dp_pv > (dp_ema_new + hy) %}
+        {% set feed_ok = dp_sensors_ok and dp_pv > (dp_load + hy) %}
         {% set sign = -1 if (neg and (not dp or feed_ok)) else 1 %}
         {% if s < 0 %}
           {{ m | int * sign }}
@@ -550,22 +512,6 @@ actions:
           {% set result = [[m, (m + buf) | round(0) | int] | max, c] | min %}
           {{ result | int * (-1 if neg else 1) }}
         {% endif %}
-
-  # ── Last-EMA persistieren / Persist load EMA ───────────────────────────────
-  # Nur schreiben wenn Helfer konfiguriert UND Sensoren gültig UND Wert geändert.
-  # Only write when helper is configured AND sensors are valid AND the value changed.
-  - choose:
-      - conditions:
-          - condition: template
-            value_template: >
-              {{ dp_ema_valid and dp_sensors_ok and
-                 (states(ema_load_entity) | float(-999999) | round(0)) != (dp_ema_new | round(0)) }}
-        sequence:
-          - action: input_number.set_value
-            target:
-              entity_id: "{{ ema_load_entity }}"
-            data:
-              value: "{{ dp_ema_new }}"
 
   # ── Offset in Zonen schreiben / Write offset to zones ─────────────────────
   # Nur schreiben wenn Zone konfiguriert UND Wert geändert — vermeidet unnötige

@@ -6,8 +6,7 @@ Das Blueprint hat kein Versionsschema — Einträge sind nach Datum gruppiert.
 ## 2026-08-02
 - Entladeschutz-Vorzeichenflattern behoben: Live-Test zeigte einen sich selbst erregenden Regelkreis (Offset alle 30 s zwischen −250 W und +250 W), weil der Vergleich PV vs. Ausgangsleistung die Ausgangsleistung des PI-Reglers gegen sich selbst verglich
 - Vergleichsgröße auf Hauslast (Ausgangsleistung + rohe Netzleistung) umgestellt — physikalische Invariante, unabhängig von der internen PI-Aufteilung zwischen Ausgang und Netz
-- Neue Sensoren: rohe Netzleistung (`grid_power_sensor`) sowie `input_number`-Helfer zur Speicherung der EMA-geglätteten Hauslast zwischen den 30s-Zyklen
-- Neuer Parameter „Lastglättung α“ (Standard 0.2, ≈ 90 s Zeitkonstante) filtert kurze Lastspitzen (z. B. Wasserkocher)
+- Neuer Sensor: rohe Netzleistung (`grid_power_sensor`)
 - Entlade-Hysterese-Standard auf 100 W angehoben (zuvor 50 W)
 
 ## 2026-07-31
