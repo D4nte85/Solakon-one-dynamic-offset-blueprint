@@ -83,12 +83,41 @@ Stromzähler (roh)
 
 > ⚠️ **Negativer Offset:** Der `input_number`-Helfer muss `min: −500` (oder kleiner) gesetzt haben, damit negative Werte angenommen werden. Ein Helfer mit `min: 0` verwirft negative Werte stillschweigend.
 
-### Schritt 3 — Blueprint importieren & Automation anlegen
+### Schritt 3 — Entladeschutz (Optional, nur Zone 1)
+
+*Nur nötig, wenn „Entladeschutz“ in Zone 1 aktiviert werden soll — siehe [Entladeschutz](#entladeschutz-optional).*
+
+**3a — Vorhandene Sensoren identifizieren** *(keine Neuanlage nötig)*
+
+| Zweck | Beispiel-Entität |
+|-------|-------------------|
+| PV-Leistung | `sensor.solakon_one_pv_leistung` |
+| Ausgangsleistung (Wechselrichter) | `sensor.solakon_one_leistung` |
+| Netzleistung, roh | derselbe Sensor wie in Schritt 1 (`sensor.shelly3em_power` o.ä.) |
+
+**3b — EMA-Speicher anlegen**
+
+*Helfer → **Zahl erstellen***
+
+| Feld | Wert |
+|------|------|
+| Name | `Solakon Zone1 Last-EMA` |
+| Objekt-ID | `solakon_zone1_load_ema` |
+| Min | `−2000` |
+| Max | `5000` |
+| Schrittweite | `1` |
+| Einheit | `W` |
+| Startwert | `0` |
+
+> ⚠️ Min/Max großzügig wählen — der Wert darf sowohl deutlich negativ (Einspeisung) als auch stark positiv (Bezug + hohe Last) werden.
+
+### Schritt 4 — Blueprint importieren & Automation anlegen
 
 1. Blueprint-Datei nach `config/blueprints/automation/solakon/` kopieren
 2. *Einstellungen → Automationen → **Blueprint-Automation erstellen***
 3. Blueprint `Solakon ONE — Dynamischer Offset` wählen
 4. Pflichtfelder belegen, optionale Parameter pro Zone anpassen
+5. *(Optional)* Im Abschnitt „Entladeschutz-Sensoren“ die drei Sensoren aus Schritt 3a sowie den EMA-Helfer aus Schritt 3b eintragen, dann in Zone 1 „Entladeschutz“ aktivieren
 
 ---
 
@@ -246,12 +275,41 @@ The standard deviation over 60 seconds estimates the required buffer size. Spike
 
 > ⚠️ **Negative offset:** The `input_number` helper must have `min: −500` (or lower) to accept negative values. A helper with `min: 0` will silently discard negative values.
 
-### Step 3 — Import Blueprint & Create Automation
+### Step 3 — Discharge Protection (Optional, Zone 1 only)
+
+*Only needed if "Discharge protection" should be enabled in Zone 1 — see [Discharge Protection](#discharge-protection-optional).*
+
+**3a — Identify existing sensors** *(nothing new to create)*
+
+| Purpose | Example entity |
+|---------|-----------------|
+| PV power | `sensor.solakon_one_pv_leistung` |
+| Output power (inverter) | `sensor.solakon_one_leistung` |
+| Raw grid power | same sensor as Step 1 (`sensor.shelly3em_power` or similar) |
+
+**3b — Create the EMA storage helper**
+
+*Helpers → **Create number***
+
+| Field | Value |
+|-------|-------|
+| Name | `Solakon Zone1 Last-EMA` |
+| Object ID | `solakon_zone1_load_ema` |
+| Min | `−2000` |
+| Max | `5000` |
+| Step | `1` |
+| Unit | `W` |
+| Initial value | `0` |
+
+> ⚠️ Choose generous min/max — the value can swing strongly negative (feed-in) or positive (draw + high load).
+
+### Step 4 — Import Blueprint & Create Automation
 
 1. Copy blueprint file to `config/blueprints/automation/solakon/`
 2. *Settings → Automations → **Create blueprint automation***
 3. Select `Solakon ONE — Dynamischer Offset`
 4. Fill in required fields, adjust optional parameters per zone as needed
+5. *(Optional)* Under "Discharge-Protection Sensors" enter the three sensors from Step 3a and the EMA helper from Step 3b, then enable "Discharge Protection" in Zone 1
 
 ---
 
