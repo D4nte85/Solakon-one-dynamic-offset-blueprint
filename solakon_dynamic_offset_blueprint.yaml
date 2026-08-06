@@ -101,6 +101,22 @@ blueprint:
               domain: sensor
               device_class: power
 
+        soc_sensor:
+          name: 🔋 Batterieladestand / Battery SoC (Optional)
+          description: >
+            Batterieladestand (%). Nur als „Voll“-Gate: ab der Voll-Schwelle wird der
+            Entladeschutz abgeschaltet, damit überschüssige PV eingespeist statt abgeregelt
+            wird — bei vollem Akku gibt es keine Entladung zu schützen. Leer lassen = Gate aus
+            (Entladeschutz greift immer, wenn aktiviert).
+            Battery state of charge (%). Used only as a "full" gate: at/above the full
+            threshold discharge protection is switched off so surplus PV is fed in instead
+            of curtailed — with a full battery there is no discharge to protect against.
+            Leave empty = gate off (protection always applies when enabled).
+          default: {}
+          selector:
+            entity:
+              domain: sensor
+
         ema_load_helper:
           name: 🧮 Last-EMA-Speicher / Load EMA Storage (input_number — ERFORDERLICH bei Entladeschutz)
           description: >
@@ -247,6 +263,26 @@ blueprint:
               min: 0
               max: 500
               unit_of_measurement: W
+
+        zone1_soc_full_threshold:
+          name: "🔋 Voll-Schwelle / Full Threshold (%)"
+          description: >
+            Ab diesem Batterieladestand wird der Entladeschutz abgeschaltet — überschüssige PV
+            wird eingespeist statt abgeregelt (bei vollem Akku gibt es keine Entladung, vor der
+            zu schützen wäre; bei aktivem Schutz würde der Regler sonst unnötig Netz beziehen und
+            die PV auf den Eigenbedarf gedrosselt halten). Nur wirksam, wenn ein Batterie-Sensor
+            gesetzt ist. Empfehlung: 98 %.
+            At/above this state of charge, discharge protection is switched off — surplus PV is
+            fed in instead of curtailed (a full battery has no discharge to protect against; with
+            protection active the controller would otherwise draw grid needlessly and keep PV
+            throttled to own consumption). Only effective when a battery sensor is set.
+            Recommended: 98 %.
+          default: 98
+          selector:
+            number:
+              min: 50
+              max: 100
+              unit_of_measurement: "%"
 
     # ══════════════════════════════════════════════════════════════════════════
     # ZONE 2
@@ -430,6 +466,7 @@ variables:
   pv_power_sensor: !input pv_power_sensor
   actual_power_sensor: !input actual_power_sensor
   grid_power_sensor: !input grid_power_sensor
+  soc_sensor: !input soc_sensor
   ema_load_entity: !input ema_load_helper
   load_alpha_input: !input load_smoothing_factor
   # Zone 1
@@ -441,6 +478,7 @@ variables:
   zone1_factor: !input zone1_volatility_factor
   zone1_discharge_protect: !input zone1_discharge_protection
   zone1_hysteresis: !input zone1_discharge_hysteresis
+  zone1_soc_full: !input zone1_soc_full_threshold
   # Zone 2
   offset_zone2_entity: !input offset_zone2_helper
   zone2_negative: !input zone2_negative_offset
@@ -477,6 +515,20 @@ variables:
   dp_alpha: "{{ load_alpha_input | float(0.2) }}"
   dp_ema_new: >
     {{ (dp_ema_old + dp_alpha * (dp_load_now - dp_ema_old)) if dp_sensors_ok else dp_ema_old }}
+  # Voll-Gate: Bei vollem Akku wird PV auf den Eigenbedarf gedrosselt — die gemessene
+  # PV-Leistung unterschätzt dann ihr Potenzial, und der Entladeschutz würde sich in einen
+  # unnötigen Netzbezug einsperren. Ab der Voll-Schwelle Schutz aus → konfiguriertes
+  # Vorzeichen (Einspeisung) greift, überschüssige PV wird exportiert statt abgeregelt.
+  # Sensor leer/ungültig → Gate inaktiv (Schutz greift wie bisher).
+  # Full gate: at a full battery PV is throttled to own consumption — measured PV then
+  # understates its potential and discharge protection would lock itself into a needless
+  # grid draw. At/above the full threshold, protection off → the configured sign (feed-in)
+  # applies, exporting surplus PV instead of curtailing it.
+  # Sensor empty/invalid → gate inactive (protection applies as before).
+  dp_soc_valid: >
+    {{ soc_sensor is string and soc_sensor | length > 0 and
+       states(soc_sensor) not in ['unknown', 'unavailable', 'none', ''] }}
+  dp_battery_full: "{{ dp_soc_valid and (states(soc_sensor) | float(0)) >= (zone1_soc_full | float(98)) }}"
   # Gültigkeit / Validity
   offset_zone1_valid: >
     {{ offset_zone1_entity is string and offset_zone1_entity | length > 0 }}
@@ -511,8 +563,11 @@ actions:
         {% set neg = zone1_negative | bool(false) %}
         {% set dp = zone1_discharge_protect | bool(false) %}
         {% set hy = zone1_hysteresis | float(100) %}
+        {# Voll-Gate: bei vollem Akku Schutz aus (nichts zu entladen) → Einspeisung erlauben #}
+        {# Full gate: at a full battery protection is off (nothing to discharge) → allow feed-in #}
+        {% set dp_active = dp and not dp_battery_full %}
         {% set feed_ok = dp_sensors_ok and dp_pv > (dp_ema_new + hy) %}
-        {% set sign = -1 if (neg and (not dp or feed_ok)) else 1 %}
+        {% set sign = -1 if (neg and (not dp_active or feed_ok)) else 1 %}
         {% if s < 0 %}
           {{ m | int * sign }}
         {% else %}

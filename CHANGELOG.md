@@ -3,6 +3,11 @@
 Alle nennenswerten Änderungen am Solakon-Dynamic-Offset-Blueprint.
 Das Blueprint hat kein Versionsschema — Einträge sind nach Datum gruppiert.
 
+## 2026-08-06
+- Voll-Gate für den Entladeschutz ergänzt: bei vollem Akku (SoC ≥ Voll-Schwelle, Standard 98 %) wird der Schutz abgeschaltet, damit überschüssige PV eingespeist statt abgeregelt wird
+- Behebt eine bistabile Verriegelung bei vollem Akku: da der Wechselrichter die PV dann auf den Eigenbedarf drosselt, unterschätzt die gemessene PV-Leistung ihr Potenzial, und der aktive Schutz konnte sich in einen unnötigen dauerhaften Netzbezug einsperren (statt den Überschuss zu exportieren)
+- Neuer optionaler Batterie-Sensor (`soc_sensor`) und Zone-1-Parameter „Voll-Schwelle“; ohne Batterie-Sensor unverändertes Verhalten. Der Batterie-Sensor dient nur der Voll-Erkennung, nicht der Zonenwahl (die bleibt beim Haupt-Blueprint)
+
 ## 2026-08-02
 - Entladeschutz-Vorzeichenflattern behoben: Live-Test zeigte einen sich selbst erregenden Regelkreis (Offset alle 30 s zwischen −250 W und +250 W), weil der Vergleich PV vs. Ausgangsleistung die Ausgangsleistung des PI-Reglers gegen sich selbst verglich
 - Vergleichsgröße auf Hauslast (Ausgangsleistung + rohe Netzleistung) umgestellt — physikalische Invariante, unabhängig von der internen PI-Aufteilung zwischen Ausgang und Netz
