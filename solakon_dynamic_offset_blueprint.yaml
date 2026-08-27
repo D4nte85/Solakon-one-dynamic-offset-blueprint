@@ -35,6 +35,118 @@ blueprint:
               domain: sensor
 
     # ══════════════════════════════════════════════════════════════════════════
+    # ENTLADESCHUTZ — Sensoren (Optional / Optional)
+    # ══════════════════════════════════════════════════════════════════════════
+    discharge_section:
+      name: "🔋 Entladeschutz-Sensoren / Discharge-Protection Sensors"
+      description: >
+        Nur nötig, wenn „Entladeschutz“ in Zone 1 aktiviert ist. Verhindert, dass ein
+        negativer Offset Batterieenergie ins Netz einspeist, während der Akku entlädt.
+        Nur Zone 1 entlädt aktiv — Zone 2 und AC erzwingen im Haupt-Blueprint 0 A Entladestrom.
+
+        Die Entscheidung vergleicht PV-Leistung mit der Hauslast (Ausgang + Netz), nicht mit
+        der Ausgangsleistung allein — letztere wird vom PI-Regler selbst gesteuert und würde
+        bei einem naiven Vergleich einen sich selbst erregenden Vorzeichen-Flatterer erzeugen
+        (Ausgang steigt → „Entladung“ erkannt → Offset kippt positiv → PI senkt Ausgang →
+        „Überschuss“ erkannt → Offset kippt negativ → …). Last = Ausgang + Netz ist dagegen
+        eine physikalische Invariante (Energieerhaltung) und bleibt unabhängig davon, wie der
+        PI-Regler intern zwischen Ausgang und Netz aufteilt.
+
+        Only needed if "Discharge protection" is enabled in Zone 1. Prevents a negative
+        offset from feeding battery energy into the grid while the battery is discharging.
+        Only Zone 1 actively discharges — Zone 2 and AC force 0 A discharge current in the main blueprint.
+
+        The decision compares PV power against house load (output + grid), not against
+        output power alone — output is itself steered by the PI controller, and a naive
+        comparison there creates a self-exciting sign-chatter loop (output rises → "discharging"
+        detected → offset flips positive → PI lowers output → "surplus" detected → offset flips
+        negative → …). Load = output + grid is a physical invariant (energy conservation) and
+        stays unaffected by how the PI controller internally splits output vs. grid.
+      collapsed: true
+      input:
+
+        pv_power_sensor:
+          name: ☀️ PV-Leistung / PV Power
+          description: >
+            Aktuelle PV-Gesamterzeugung (W). Vergleich mit der Hauslast erkennt Überschuss.
+            Current total PV generation (W). Compared against house load to detect surplus.
+            Standard / Default: `sensor.solakon_one_pv_leistung`
+          default: sensor.solakon_one_pv_leistung
+          selector:
+            entity:
+              domain: sensor
+
+        actual_power_sensor:
+          name: ⚡ Ausgangsleistung / Output Power
+          description: >
+            Tatsächliche AC-Ausgangsleistung des Wechselrichters (W). Fließt in die
+            Hauslast-Berechnung ein (Last = Ausgang + Netz).
+            Actual AC output power of the inverter (W). Used to compute house load
+            (load = output + grid).
+            Standard / Default: `sensor.solakon_one_leistung`
+          default: sensor.solakon_one_leistung
+          selector:
+            entity:
+              domain: sensor
+
+        grid_power_sensor:
+          name: 🔌 Netzleistung, roh / Grid Power, Raw
+          description: >
+            Rohe, ungemittelte Netzleistung (W) — meist derselbe Sensor, der auch den
+            StdDev-Helfer speist (z.B. Shelly 3EM). Positiv = Bezug, negativ = Einspeisung.
+            Raw, unaveraged grid power (W) — usually the same sensor that feeds the
+            StdDev helper (e.g. Shelly 3EM). Positive = import, negative = export.
+          selector:
+            entity:
+              domain: sensor
+              device_class: power
+
+        soc_sensor:
+          name: 🔋 Batterieladestand / Battery SoC (Optional)
+          description: >
+            Batterieladestand (%). Nur als „Voll“-Gate: ab der Voll-Schwelle wird der
+            Entladeschutz abgeschaltet, damit überschüssige PV eingespeist statt abgeregelt
+            wird — bei vollem Akku gibt es keine Entladung zu schützen. Leer lassen = Gate aus
+            (Entladeschutz greift immer, wenn aktiviert).
+            Battery state of charge (%). Used only as a "full" gate: at/above the full
+            threshold discharge protection is switched off so surplus PV is fed in instead
+            of curtailed — with a full battery there is no discharge to protect against.
+            Leave empty = gate off (protection always applies when enabled).
+          default: {}
+          selector:
+            entity:
+              domain: sensor
+
+        ema_load_helper:
+          name: 🧮 Last-EMA-Speicher / Load EMA Storage (input_number — ERFORDERLICH bei Entladeschutz)
+          description: >
+            input_number-Helfer zum Speichern der geglätteten Hauslast zwischen den 30s-Zyklen.
+            Empfehlung: Min −2000, Max 5000, Step 1, Start 0.
+            input_number helper to persist the smoothed house load between 30 s cycles.
+            Recommended: Min −2000, Max 5000, Step 1, Initial 0.
+          default: {}
+          selector:
+            entity:
+              domain: input_number
+
+        load_smoothing_factor:
+          name: "🧮 Lastglättung α / Load Smoothing Factor (α)"
+          description: >
+            EMA-Glättungsfaktor für die Hauslast. Kleiner = glatter, aber träger;
+            größer = reaktionsschneller, aber empfindlicher für kurze Lastspitzen
+            (z.B. Wasserkocher). Bei 30s-Zyklus entspricht 0.2 ≈ 90s Zeitkonstante.
+            EMA smoothing factor for the house load. Smaller = smoother but slower;
+            larger = more responsive but more sensitive to short load spikes
+            (e.g. a kettle). At a 30 s cycle, 0.2 ≈ a 90 s time constant.
+            Empfehlung / Recommended: 0.2.
+          default: 0.2
+          selector:
+            number:
+              min: 0.05
+              max: 0.9
+              step: 0.05
+
+    # ══════════════════════════════════════════════════════════════════════════
     # ZONE 1
     # ══════════════════════════════════════════════════════════════════════════
     zone1_section:
@@ -121,6 +233,56 @@ blueprint:
               min: 0.5
               max: 5.0
               step: 0.1
+
+        zone1_discharge_protection:
+          name: "🛡️ Entladeschutz / Discharge Protection"
+          description: >
+            Aus / Ein — nur wirksam bei aktivem negativem Offset. Ein: Einspeisung wird
+            unterdrückt (Offset wird positiv), sobald die (geglättete) Hauslast die PV-Leistung
+            erreicht oder übersteigt. Benötigt die Entladeschutz-Sensoren.
+            Die SoC-Zonenlogik übernimmt das Haupt-Blueprint.
+            Off / On — only effective with negative offset enabled. On: feed-in is suppressed
+            (offset turns positive) as soon as the (smoothed) house load reaches or exceeds
+            PV power. Requires the discharge-protection sensors.
+            SoC zone logic is handled by the main blueprint.
+          default: false
+          selector:
+            boolean:
+
+        zone1_discharge_hysteresis:
+          name: "↔️ Entlade-Hysterese / Discharge Hysteresis (W)"
+          description: >
+            Sicherheitsmarge auf den Vergleich PV > Hauslast. PV muss die geglättete Hauslast
+            um diesen Wert übersteigen, damit Überschuss als echt gilt.
+            Safety margin on the PV > house-load comparison. PV must exceed the smoothed
+            house load by this amount for surplus to count as real.
+            Empfehlung / Recommended: 100 W.
+          default: 100
+          selector:
+            number:
+              min: 0
+              max: 500
+              unit_of_measurement: W
+
+        zone1_soc_full_threshold:
+          name: "🔋 Voll-Schwelle / Full Threshold (%)"
+          description: >
+            Ab diesem Batterieladestand wird der Entladeschutz abgeschaltet — überschüssige PV
+            wird eingespeist statt abgeregelt (bei vollem Akku gibt es keine Entladung, vor der
+            zu schützen wäre; bei aktivem Schutz würde der Regler sonst unnötig Netz beziehen und
+            die PV auf den Eigenbedarf gedrosselt halten). Nur wirksam, wenn ein Batterie-Sensor
+            gesetzt ist. Empfehlung: 98 %.
+            At/above this state of charge, discharge protection is switched off — surplus PV is
+            fed in instead of curtailed (a full battery has no discharge to protect against; with
+            protection active the controller would otherwise draw grid needlessly and keep PV
+            throttled to own consumption). Only effective when a battery sensor is set.
+            Recommended: 98 %.
+          default: 98
+          selector:
+            number:
+              min: 50
+              max: 100
+              unit_of_measurement: "%"
 
     # ══════════════════════════════════════════════════════════════════════════
     # ZONE 2
@@ -300,6 +462,13 @@ mode: single
 
 variables:
   stddev_sensor: !input stddev_sensor
+  # Entladeschutz-Sensoren / Discharge-protection sensors
+  pv_power_sensor: !input pv_power_sensor
+  actual_power_sensor: !input actual_power_sensor
+  grid_power_sensor: !input grid_power_sensor
+  soc_sensor: !input soc_sensor
+  ema_load_entity: !input ema_load_helper
+  load_alpha_input: !input load_smoothing_factor
   # Zone 1
   offset_zone1_entity: !input offset_zone1_helper
   zone1_negative: !input zone1_negative_offset
@@ -307,6 +476,9 @@ variables:
   zone1_cap: !input zone1_cap_offset
   zone1_noise: !input zone1_noise_floor
   zone1_factor: !input zone1_volatility_factor
+  zone1_discharge_protect: !input zone1_discharge_protection
+  zone1_hysteresis: !input zone1_discharge_hysteresis
+  zone1_soc_full: !input zone1_soc_full_threshold
   # Zone 2
   offset_zone2_entity: !input offset_zone2_helper
   zone2_negative: !input zone2_negative_offset
@@ -321,6 +493,42 @@ variables:
   zone_ac_cap: !input zone_ac_cap_offset
   zone_ac_noise: !input zone_ac_noise_floor
   zone_ac_factor: !input zone_ac_volatility_factor
+  # Entladeschutz-Entscheidung: Hauslast (Ausgang + Netz) statt Ausgang allein — siehe
+  # Erläuterung in der Entladeschutz-Sensoren-Sektion oben (verhindert selbst erregtes
+  # Vorzeichen-Flattern). Zusätzlich EMA-geglättet, um kurze Lastspitzen zu ignorieren.
+  # Sensor ungültig → Schutz greift (kein Feed-in), EMA wird eingefroren.
+  # Discharge-protection decision: house load (output + grid) instead of output alone —
+  # see explanation in the discharge-protection sensors section above (prevents
+  # self-exciting sign chatter). Additionally EMA-smoothed to ride out short load spikes.
+  # Sensor invalid → protect (no feed-in), EMA is frozen.
+  dp_pv_state: "{{ states(pv_power_sensor) }}"
+  dp_out_state: "{{ states(actual_power_sensor) }}"
+  dp_grid_state: "{{ states(grid_power_sensor) }}"
+  dp_sensors_ok: >
+    {{ dp_pv_state not in ['unknown', 'unavailable', 'none', ''] and
+       dp_out_state not in ['unknown', 'unavailable', 'none', ''] and
+       dp_grid_state not in ['unknown', 'unavailable', 'none', ''] }}
+  dp_ema_valid: "{{ ema_load_entity is string and ema_load_entity | length > 0 }}"
+  dp_pv: "{{ dp_pv_state | float(0) }}"
+  dp_load_now: "{{ (dp_out_state | float(0)) + (dp_grid_state | float(0)) }}"
+  dp_ema_old: "{{ states(ema_load_entity) | float(dp_load_now) if dp_ema_valid else dp_load_now }}"
+  dp_alpha: "{{ load_alpha_input | float(0.2) }}"
+  dp_ema_new: >
+    {{ (dp_ema_old + dp_alpha * (dp_load_now - dp_ema_old)) if dp_sensors_ok else dp_ema_old }}
+  # Voll-Gate: Bei vollem Akku wird PV auf den Eigenbedarf gedrosselt — die gemessene
+  # PV-Leistung unterschätzt dann ihr Potenzial, und der Entladeschutz würde sich in einen
+  # unnötigen Netzbezug einsperren. Ab der Voll-Schwelle Schutz aus → konfiguriertes
+  # Vorzeichen (Einspeisung) greift, überschüssige PV wird exportiert statt abgeregelt.
+  # Sensor leer/ungültig → Gate inaktiv (Schutz greift wie bisher).
+  # Full gate: at a full battery PV is throttled to own consumption — measured PV then
+  # understates its potential and discharge protection would lock itself into a needless
+  # grid draw. At/above the full threshold, protection off → the configured sign (feed-in)
+  # applies, exporting surplus PV instead of curtailing it.
+  # Sensor empty/invalid → gate inactive (protection applies as before).
+  dp_soc_valid: >
+    {{ soc_sensor is string and soc_sensor | length > 0 and
+       states(soc_sensor) not in ['unknown', 'unavailable', 'none', ''] }}
+  dp_battery_full: "{{ dp_soc_valid and (states(soc_sensor) | float(0)) >= (zone1_soc_full | float(98)) }}"
   # Gültigkeit / Validity
   offset_zone1_valid: >
     {{ offset_zone1_entity is string and offset_zone1_entity | length > 0 }}
@@ -353,12 +561,19 @@ actions:
         {% set n = zone1_noise | float(15) %}
         {% set f = zone1_factor | float(1.5) %}
         {% set neg = zone1_negative | bool(false) %}
+        {% set dp = zone1_discharge_protect | bool(false) %}
+        {% set hy = zone1_hysteresis | float(100) %}
+        {# Voll-Gate: bei vollem Akku Schutz aus (nichts zu entladen) → Einspeisung erlauben #}
+        {# Full gate: at a full battery protection is off (nothing to discharge) → allow feed-in #}
+        {% set dp_active = dp and not dp_battery_full %}
+        {% set feed_ok = dp_sensors_ok and dp_pv > (dp_ema_new + hy) %}
+        {% set sign = -1 if (neg and (not dp_active or feed_ok)) else 1 %}
         {% if s < 0 %}
-          {{ m | int * (-1 if neg else 1) }}
+          {{ m | int * sign }}
         {% else %}
           {% set buf = [0, (s - n) * f] | max %}
           {% set result = [[m, (m + buf) | round(0) | int] | max, c] | min %}
-          {{ result | int * (-1 if neg else 1) }}
+          {{ result | int * sign }}
         {% endif %}
 
       dynamic_offset_zone2: >
@@ -390,6 +605,22 @@ actions:
           {% set result = [[m, (m + buf) | round(0) | int] | max, c] | min %}
           {{ result | int * (-1 if neg else 1) }}
         {% endif %}
+
+  # ── Last-EMA persistieren / Persist load EMA ───────────────────────────────
+  # Nur schreiben wenn Helfer konfiguriert UND Sensoren gültig UND Wert geändert.
+  # Only write when helper is configured AND sensors are valid AND the value changed.
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ dp_ema_valid and dp_sensors_ok and
+                 (states(ema_load_entity) | float(-999999) | round(0)) != (dp_ema_new | round(0)) }}
+        sequence:
+          - action: input_number.set_value
+            target:
+              entity_id: "{{ ema_load_entity }}"
+            data:
+              value: "{{ dp_ema_new }}"
 
   # ── Offset in Zonen schreiben / Write offset to zones ─────────────────────
   # Nur schreiben wenn Zone konfiguriert UND Wert geändert — vermeidet unnötige
